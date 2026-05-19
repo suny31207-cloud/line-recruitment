@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>管理者ログイン - COLOR KITCHEN</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-box">
+    <div class="login-logo">
+      <h1>COLOR KITCHEN</h1>
+      <p>採用管理システム</p>
+    </div>
+    <% if (error) { %>
+    <div class="alert alert-error"><%= error %></div>
+    <% } %>
+    <form action="/admin/login" method="POST">
+      <div class="form-group">
+        <label>管理者ID</label>
+        <input type="text" name="id" placeholder="ID" required autofocus>
+      </div>
+      <div class="form-group">
+        <label>パスワード</label>
+        <input type="password" name="password" placeholder="パスワード" required>
+      </div>
+      <button type="submit" class="btn-submit-full">ログイン</button>
+    </form>
+  </div>
+</div>
+</body>
+</html>

@@ -97,6 +97,19 @@ tr:hover td { background: #fafbfc; }
 .btn-submit-full { width: 100%; padding: 0.85rem; background: #2d6a4f; color: white; border: none; border-radius: 6px; font-size: 1rem; font-weight: 600; cursor: pointer; margin-top: 0.75rem; transition: background 0.15s; }
 .btn-submit-full:hover { background: #1e4d38; }
 
+/* ===== Change Request Badge ===== */
+.badge-change { background: #fff3cd; color: #856404; border: 1px solid #ffc107; }
+.change-indicator { font-size: 0.75rem; color: #856404; font-weight: 600; margin-left: 0.3rem; }
+
+/* ===== Login Page ===== */
+.login-wrap { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #f0f2f5; }
+.login-box { background: white; border-radius: 10px; padding: 2.5rem 2rem; width: 100%; max-width: 380px; box-shadow: 0 4px 16px rgba(0,0,0,0.1); }
+.login-logo { text-align: center; margin-bottom: 2rem; }
+.login-logo h1 { font-size: 1.3rem; color: #2d6a4f; font-weight: 700; }
+.login-logo p { font-size: 0.85rem; color: #888; margin-top: 0.25rem; }
+.logout-link { font-size: 0.78rem; color: #aaa; text-decoration: none; margin-left: auto; }
+.logout-link:hover { color: #dc3545; }
+
 /* ===== Success Box ===== */
 .success-box { text-align: center; padding: 2.5rem 1.5rem; }
 .success-icon { font-size: 3rem; margin-bottom: 1rem; }

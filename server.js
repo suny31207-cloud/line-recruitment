@@ -1,6 +1,7 @@
 // LINE採用管理システム
 require('dotenv').config();
 const express = require('express');
+const session = require('express-session');
 const line = require('@line/bot-sdk');
 const { google } = require('googleapis');
 const path = require('path');
@@ -17,6 +18,14 @@ app.use(express.static(path.join(__dirname, 'public')));
 // /webhook はline.middlewareが自前でbody読み込みするため除外
 app.use('/admin', express.urlencoded({ extended: true }));
 app.use('/survey', express.urlencoded({ extended: true }));
+
+// ===== セッション設定 =====
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'line-recruit-secret-2026',
+  resave: false,
+  saveUninitialized: false,
+  cookie: { maxAge: 8 * 60 * 60 * 1000 }, // 8時間
+}));
 
 // ===== LINE設定 =====
 const lineConfig = {
@@ -175,6 +184,29 @@ function buildInterviewMessages(displayName) {
   ];
 }
 
+function buildScheduleMessage(name, type, date) {
+  const typeLabel = type === 'visit' ? '見学' : '面接';
+  return [
+    {
+      type: 'text',
+      text: `${name}様\n\n${typeLabel}日程が決まりましたのでお知らせします。\n\n【${typeLabel}予定日】\n${date}\n\nご確認のうえ、下記よりお返事ください。`,
+    },
+    {
+      type: 'template',
+      altText: `${typeLabel}日程の確認（アプリ画面でご確認ください）`,
+      template: {
+        type: 'buttons',
+        title: `${typeLabel}日程の確認`,
+        text: `${date} のご都合はいかがでしょうか？`,
+        actions: [
+          { type: 'postback', label: '確認しました', data: `action=confirm_schedule&type=${type}`, displayText: '確認しました' },
+          { type: 'postback', label: '日程変更を希望する', data: `action=request_change&type=${type}`, displayText: '日程変更を希望する' },
+        ],
+      },
+    },
+  ];
+}
+
 // ===== Webhookイベントハンドラ =====
 async function handleFollow(event) {
   const userId = event.source.userId;
@@ -217,33 +249,64 @@ async function handleMessage(event) {
 
 async function handlePostback(event) {
   const userId = event.source.userId;
-  const action = new URLSearchParams(event.postback.data).get('action');
-  if (action !== 'join' && action !== 'decline') return;
+  const params = new URLSearchParams(event.postback.data);
+  const action = params.get('action');
+  const type = params.get('type'); // 'visit' or 'interview'
 
-  // 対応完了済みなら重複受付しない
-  const existing = await findRowByUserId(userId);
-  if (existing && padRow(existing.rowData)[COL.現在ステータス] === '対応完了') {
+  // 入社/辞退
+  if (action === 'join' || action === 'decline') {
+    const existing = await findRowByUserId(userId);
+    if (existing && padRow(existing.rowData)[COL.現在ステータス] === '対応完了') {
+      await client.replyMessage(event.replyToken, {
+        type: 'text', text: '既にご回答を受け付けております。ありがとうございました。',
+      });
+      return;
+    }
+    const result = action === 'join' ? '入社希望' : '辞退';
+    const replyText = action === 'join'
+      ? 'ご回答ありがとうございます。\n「入社を希望する」として受付いたしました。\n担当者より改めてご連絡いたします。'
+      : 'ご回答ありがとうございます。\n「辞退する」として受付いたしました。\nこの度はご検討いただき、誠にありがとうございました。';
+    try {
+      await upsertCandidate(userId, {
+        [COL.回答日時]: nowJST(),
+        [COL.回答結果]: result,
+        [COL.現在ステータス]: '対応完了',
+      });
+      console.log(`[ANSWER] ${userId} → ${result}`);
+    } catch (e) { console.error('[ERROR] sheets書き込み失敗:', e.message); }
+    await client.replyMessage(event.replyToken, [{ type: 'text', text: replyText }]);
+    return;
+  }
+
+  // 日程確認
+  if (action === 'confirm_schedule') {
+    const typeLabel = type === 'visit' ? '見学' : '面接';
     await client.replyMessage(event.replyToken, {
-      type: 'text', text: '既にご回答を受け付けております。ありがとうございました。',
+      type: 'text',
+      text: `ご確認ありがとうございます。\n${typeLabel}日程を承りました。\n当日お待ちしております！`,
     });
     return;
   }
 
-  const result = action === 'join' ? '入社希望' : '辞退';
-  const replyText = action === 'join'
-    ? 'ご回答ありがとうございます。\n「入社を希望する」として受付いたしました。\n担当者より改めてご連絡いたします。'
-    : 'ご回答ありがとうございます。\n「辞退する」として受付いたしました。\nこの度はご検討いただき、誠にありがとうございました。';
-
-  try {
-    await upsertCandidate(userId, {
-      [COL.回答日時]: nowJST(),
-      [COL.回答結果]: result,
-      [COL.現在ステータス]: '対応完了',
+  // 日程変更希望
+  if (action === 'request_change') {
+    const typeLabel = type === 'visit' ? '見学' : '面接';
+    try {
+      const existing = await findRowByUserId(userId);
+      if (existing) {
+        const row = padRow(existing.rowData);
+        const prevNote = row[COL.備考] || '';
+        const changeNote = `【${typeLabel}日程変更希望】${nowJST()}`;
+        const newNote = prevNote ? `${prevNote}\n${changeNote}` : changeNote;
+        await upsertCandidate(userId, { [COL.備考]: newNote });
+      }
+    } catch (e) { console.error('[ERROR] 変更希望メモ失敗:', e.message); }
+    await client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: `${typeLabel}日程の変更ご希望を承りました。\n担当者より改めてご連絡いたします。\nご不便をおかけして申し訳ございません。`,
     });
-    console.log(`[ANSWER] ${userId} → ${result}`);
-  } catch (e) { console.error('[ERROR] sheets書き込み失敗:', e.message); }
-
-  await client.replyMessage(event.replyToken, [{ type: 'text', text: replyText }]);
+    return;
+  }
 }
 
 // ===== Webhookエンドポイント =====
@@ -260,24 +323,52 @@ app.post('/webhook', line.middleware(lineConfig), async (req, res) => {
   }
 });
 
+// ===== 管理者ログイン =====
+app.get('/admin/login', (req, res) => {
+  if (req.session.adminLoggedIn) return res.redirect('/admin');
+  res.render('admin/login', { error: null });
+});
+
+app.post('/admin/login', (req, res) => {
+  const { id, password } = req.body;
+  if (id === (process.env.ADMIN_ID || 'admin') && password === (process.env.ADMIN_PASSWORD || 'colorkitchen2026')) {
+    req.session.adminLoggedIn = true;
+    res.redirect('/admin');
+  } else {
+    res.render('admin/login', { error: 'IDまたはパスワードが違います' });
+  }
+});
+
+app.get('/admin/logout', (req, res) => {
+  req.session.destroy(() => res.redirect('/admin/login'));
+});
+
+// ===== 認証チェックミドルウェア =====
+function requireAuth(req, res, next) {
+  if (req.session.adminLoggedIn) return next();
+  res.redirect('/admin/login');
+}
+
 // ===== 管理画面：一覧 =====
-app.get('/admin', async (req, res) => {
+app.get('/admin', requireAuth, async (req, res) => {
   try {
     const data = await getSheetData();
     const candidates = data.slice(1)
       .map(row => {
         const r = padRow(row);
+        const note = r[COL.備考] || '';
         return {
-          lineUserId:    r[COL.LINEユーザーID],
-          name:          r[COL.氏名],
-          preference:    r[COL.希望内容],
-          status:        r[COL.現在ステータス] || '未対応',
-          visitDate:     r[COL.見学予約日],
-          interviewDate: r[COL.面接予定日],
-          answer:        r[COL.回答結果],
-          lastSent:      r[COL.最終LINE送信日時],
-          registeredAt:  r[COL.登録日時],
-          surveyDone:    !!(r[COL.携帯番号] || r[COL.希望店舗]),
+          lineUserId:      r[COL.LINEユーザーID],
+          name:            r[COL.氏名],
+          preference:      r[COL.希望内容],
+          status:          r[COL.現在ステータス] || '未対応',
+          visitDate:       r[COL.見学予約日],
+          interviewDate:   r[COL.面接予定日],
+          answer:          r[COL.回答結果],
+          lastSent:        r[COL.最終LINE送信日時],
+          registeredAt:    r[COL.登録日時],
+          surveyDone:      !!(r[COL.携帯番号] || r[COL.希望店舗]),
+          changeRequested: note.includes('日程変更希望'),
         };
       })
       .filter(c => c.lineUserId);
@@ -286,7 +377,7 @@ app.get('/admin', async (req, res) => {
 });
 
 // ===== 管理画面：詳細 =====
-app.get('/admin/candidates/:uid', async (req, res) => {
+app.get('/admin/candidates/:uid', requireAuth, async (req, res) => {
   try {
     const found = await findRowByUserId(req.params.uid);
     if (!found) return res.status(404).send('応募者が見つかりません');
@@ -309,13 +400,16 @@ app.get('/admin/candidates/:uid', async (req, res) => {
 });
 
 // ===== 管理画面：更新 =====
-app.post('/admin/candidates/:uid', async (req, res) => {
+app.post('/admin/candidates/:uid', requireAuth, async (req, res) => {
   const userId = req.params.uid;
   const b = req.body;
   try {
     const found = await findRowByUserId(userId);
     if (!found) return res.status(404).send('応募者が見つかりません');
-    const prevStatus = padRow(found.rowData)[COL.現在ステータス];
+    const prevRow = padRow(found.rowData);
+    const prevStatus = prevRow[COL.現在ステータス];
+    const prevVisitDate = prevRow[COL.見学予約日];
+    const prevInterviewDate = prevRow[COL.面接予定日];
 
     await upsertCandidate(userId, {
       [COL.氏名]: b.name || '', [COL.性別]: b.gender || '',
@@ -337,12 +431,30 @@ app.post('/admin/candidates/:uid', async (req, res) => {
       } catch (e) { console.error('[ERROR] LINE push失敗:', e.message); }
     }
 
+    // 見学予約日が新規設定または変更 → 日程確認メッセージ送信
+    if (b.visitDate && b.visitDate !== prevVisitDate) {
+      try {
+        await client.pushMessage(userId, buildScheduleMessage(b.name || '応募者', 'visit', b.visitDate));
+        await upsertCandidate(userId, { [COL.最終LINE送信日時]: nowJST() });
+        console.log(`[AUTO-SEND] 見学日程通知: ${userId}`);
+      } catch (e) { console.error('[ERROR] 見学日程LINE push失敗:', e.message); }
+    }
+
+    // 面接予定日が新規設定または変更 → 日程確認メッセージ送信
+    if (b.interviewDate && b.interviewDate !== prevInterviewDate) {
+      try {
+        await client.pushMessage(userId, buildScheduleMessage(b.name || '応募者', 'interview', b.interviewDate));
+        await upsertCandidate(userId, { [COL.最終LINE送信日時]: nowJST() });
+        console.log(`[AUTO-SEND] 面接日程通知: ${userId}`);
+      } catch (e) { console.error('[ERROR] 面接日程LINE push失敗:', e.message); }
+    }
+
     res.redirect(`/admin/candidates/${userId}?msg=${encodeURIComponent('更新しました')}`);
   } catch (e) { res.status(500).send('エラー: ' + e.message); }
 });
 
 // ===== 管理画面：LINE個別送信 =====
-app.post('/admin/candidates/:uid/send', async (req, res) => {
+app.post('/admin/candidates/:uid/send', requireAuth, async (req, res) => {
   const userId = req.params.uid;
   const { messageType, customText } = req.body;
   try {
@@ -424,7 +536,6 @@ async function initSheetHeader() {
       console.log('[INIT] ヘッダー行を追加しました');
     }
   } catch (e) {
-    // シートが存在しない場合は作成
     if (e.message?.includes('Unable to parse range') || e.message?.includes('not found')) {
       try {
         await sheets.spreadsheets.batchUpdate({
