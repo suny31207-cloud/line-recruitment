@@ -1,0 +1,7 @@
+node_modules/
+.env
+*.log
+
+gcp-key.json
+setup-sheet.js
+tools/
