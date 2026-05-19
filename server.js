@@ -14,11 +14,16 @@ const PORT = process.env.PORT || 3000;
 // ============================================================
 
 const lineConfig = {
-  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
-  channelSecret: process.env.LINE_CHANNEL_SECRET,
+  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN || 'placeholder',
+  channelSecret: process.env.LINE_CHANNEL_SECRET || 'placeholder',
 };
 
 const client = new line.Client(lineConfig);
+
+// LINE認証情報が未設定の場合は起動時に警告だけ出す（サーバーは起動する）
+if (!process.env.LINE_CHANNEL_ACCESS_TOKEN || !process.env.LINE_CHANNEL_SECRET) {
+  console.warn('[WARN] LINE_CHANNEL_ACCESS_TOKEN または LINE_CHANNEL_SECRET が未設定です。Webhookは動作しません。');
+}
 
 // ============================================================
 // Google Sheets 設定
