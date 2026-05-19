@@ -138,12 +138,11 @@ function buildGreeting() {
 }
 
 function buildSurveyLink(userId) {
-  const url = LIFF_ID
-    ? `https://liff.line.me/${LIFF_ID}/survey/${userId}`
-    : `${APP_URL}/survey/${userId}`;
+  // LIFF URLはパス追加形式が不安定なため直リンクを使用
+  const url = `${APP_URL}/survey/${userId}`;
   return {
     type: 'text',
-    text: `採用エントリーありがとうございます。\nまずは下記アンケートにご回答ください。\n\n【必須】\n・氏名\n・携帯番号\n・希望店舗\n・希望雇用形態\n・美容師経験\n\n【任意】\n・性別・年齢・最寄駅\n・勤務開始希望日\n・サイドシャンプー\n\n▼ アンケートはこちら\n${url}`,
+    text: `ありがとうございます！\n続けて下記のアンケートにご記入ください。\n\n▼ アンケートはこちら\n${url}`,
   };
 }
 
@@ -217,9 +216,10 @@ async function handleFollow(event) {
   } catch (e) { console.error('[WARN] profile取得失敗:', e.message); }
 
   await upsertCandidate(userId, { [COL.氏名]: displayName });
+  // フォロー時: 挨拶 + 希望選択ボタン（アンケートは選択後に送る）
   await client.replyMessage(event.replyToken, [
     buildGreeting(),
-    buildSurveyLink(userId),
+    buildChoiceButtons(),
   ]);
   console.log(`[FOLLOW] ${displayName} (${userId})`);
 }
@@ -230,20 +230,28 @@ async function handleMessage(event) {
 
   if (text === '見学希望' || text === '面接希望') {
     await upsertCandidate(userId, { [COL.希望内容]: text });
-    await client.replyMessage(event.replyToken, {
-      type: 'text',
-      text: `「${text}」を承りました。\n担当者より日程のご連絡をお待ちください。`,
-    });
+    // 希望選択後: 承り + アンケートリンク送信
+    await client.replyMessage(event.replyToken, [
+      { type: 'text', text: `「${text}」を承りました！` },
+      buildSurveyLink(userId),
+    ]);
     return;
   }
 
-  // 未登録ユーザーは登録してグリーティング
+  // 未登録ユーザーは登録して挨拶 + 希望選択ボタン
   const existing = await findRowByUserId(userId);
   if (!existing) {
     let displayName = '応募者';
     try { const p = await client.getProfile(userId); displayName = p.displayName; } catch (e) {}
     await upsertCandidate(userId, { [COL.氏名]: displayName });
-    await client.replyMessage(event.replyToken, [buildGreeting(), buildSurveyLink(userId)]);
+    await client.replyMessage(event.replyToken, [buildGreeting(), buildChoiceButtons()]);
+    return;
+  }
+
+  // 登録済みで希望未選択の場合は再度ボタンを出す
+  const row = padRow(existing.rowData);
+  if (!row[COL.希望内容]) {
+    await client.replyMessage(event.replyToken, buildChoiceButtons());
   }
 }
 
@@ -508,12 +516,12 @@ app.post('/survey/:uid', async (req, res) => {
       [COL.美容師経験]: experience, [COL.サイドシャンプーありなし]: sideshampoo || '',
     });
 
-    // アンケート完了 → 選択肢をLINE送信
+    // アンケート完了 → 確認メッセージ送信
     try {
-      await client.pushMessage(userId, [
-        { type: 'text', text: 'アンケートのご回答ありがとうございます。\n\n続けて、\n・見学希望\n・面接希望\n\nからご希望をお選びください。' },
-        buildChoiceButtons(),
-      ]);
+      await client.pushMessage(userId, {
+        type: 'text',
+        text: 'アンケートのご記入ありがとうございます！\n内容を確認のうえ、担当者よりご連絡いたします。\nしばらくお待ちください😊',
+      });
       await upsertCandidate(userId, { [COL.最終LINE送信日時]: nowJST() });
     } catch (e) { console.warn('[WARN] アンケート後LINE送信失敗:', e.message); }
 
