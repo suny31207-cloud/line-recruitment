@@ -22,7 +22,7 @@
       <div class="success-icon">✅</div>
       <h3>送信完了しました</h3>
       <p>アンケートのご回答ありがとうございました。</p>
-      <p class="success-note">LINEに戻って<strong>「見学希望」または「面接希望」</strong>をお選びください。</p>
+      <p class="success-note">担当者よりご連絡いたします。しばらくお待ちください😊</p>
     </div>
 
     <% } else { %>
@@ -31,7 +31,7 @@
     <div class="alert alert-error"><%= error %></div>
     <% } %>
 
-    <p class="form-note">【必須】のついた項目は必ず入力してください</p>
+    <p class="form-note">全ての項目を入力してください</p>
 
     <form action="/survey/<%= uid %>" method="POST" novalidate>
 
@@ -43,18 +43,18 @@
 
       <div class="grid-2">
         <div class="form-group">
-          <label>性別（任意）</label>
-          <select name="gender">
-            <option value="">選択なし</option>
+          <label class="required">性別</label>
+          <select name="gender" required>
+            <option value="">選択してください</option>
             <% ['男性','女性','その他','回答しない'].forEach(v => { %>
             <option value="<%= v %>" <%= (prefill.gender||'')=== v ?'selected':'' %>><%= v %></option>
             <% }) %>
           </select>
         </div>
         <div class="form-group">
-          <label>年齢（任意）</label>
+          <label class="required">年齢</label>
           <input type="number" name="age" value="<%= prefill.age || '' %>"
-                 min="15" max="80" placeholder="25">
+                 min="15" max="80" placeholder="25" required>
         </div>
       </div>
 
@@ -66,9 +66,9 @@
       </div>
 
       <div class="form-group">
-        <label>最寄駅（任意）</label>
+        <label class="required">最寄駅</label>
         <input type="text" name="station" value="<%= prefill.station || '' %>"
-               placeholder="渋谷駅">
+               placeholder="渋谷駅" required>
       </div>
 
       <div class="form-group">
@@ -81,16 +81,16 @@
         <label class="required">希望雇用形態</label>
         <select name="employment" required>
           <option value="">選択してください</option>
-          <% ['正社員','パート・アルバイト','業務委託'].forEach(v => { %>
+          <% ['正社員','パート・アルバイト'].forEach(v => { %>
           <option value="<%= v %>" <%= (prefill.employment||'')=== v ?'selected':'' %>><%= v %></option>
           <% }) %>
         </select>
       </div>
 
       <div class="form-group">
-        <label>勤務開始希望日（任意）</label>
+        <label class="required">勤務開始希望日</label>
         <input type="text" name="startDate" value="<%= prefill.startDate || '' %>"
-               placeholder="2026年7月〜 など">
+               placeholder="2026年7月〜 など" required>
       </div>
 
       <div class="form-group">
@@ -104,9 +104,9 @@
       </div>
 
       <div class="form-group">
-        <label>サイドシャンプーの経験（任意）</label>
-        <select name="sideshampoo">
-          <option value="">選択なし</option>
+        <label class="required">サイドシャンプーの経験</label>
+        <select name="sideshampoo" required>
+          <option value="">選択してください</option>
           <% ['あり','なし'].forEach(v => { %>
           <option value="<%= v %>" <%= (prefill.sideshampoo||'')=== v ?'selected':'' %>><%= v %></option>
           <% }) %>

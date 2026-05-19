@@ -480,6 +480,37 @@ app.post('/admin/candidates/:uid', requireAuth, async (req, res) => {
   } catch (e) { res.status(500).send('エラー: ' + e.message); }
 });
 
+// ===== 管理画面：候補日時を承認して通知 =====
+app.post('/admin/candidates/:uid/confirm-date', requireAuth, async (req, res) => {
+  const userId = req.params.uid;
+  const { date, type } = req.body;
+  try {
+    const found = await findRowByUserId(userId);
+    if (!found) return res.status(404).send('応募者が見つかりません');
+    const row = padRow(found.rowData);
+    const name = row[COL.氏名] || '応募者';
+    const typeLabel = type === 'visit' ? '見学' : '面接';
+    const dateCol = type === 'visit' ? COL.見学予約日 : COL.面接予定日;
+
+    // 備考の【候補日時】を【確認済み候補日時】に更新（ボタンを非表示にする）
+    const newNote = (row[COL.備考] || '').replace('【候補日時】', '【確認済み候補日時】');
+    await upsertCandidate(userId, {
+      [dateCol]: date,
+      [COL.備考]: newNote,
+    });
+
+    // 日程確定の通知をLINEで送信
+    await client.pushMessage(userId, {
+      type: 'text',
+      text: `${name}様\n\n${typeLabel}の日程が確定いたしました。\n\n【${typeLabel}予定日】\n${date}\n\nお時間になりましたらお待ちしております！\nご不明な点はお気軽にご連絡ください。`,
+    });
+    await upsertCandidate(userId, { [COL.最終LINE送信日時]: nowJST() });
+    console.log(`[CONFIRM-DATE] ${typeLabel}日程確定: ${userId} → ${date}`);
+
+    res.redirect(`/admin/candidates/${userId}?msg=${encodeURIComponent(`${typeLabel}日程を確定し、LINEで通知しました`)}`);
+  } catch (e) { res.status(500).send('エラー: ' + e.message); }
+});
+
 // ===== 管理画面：LINE個別送信 =====
 app.post('/admin/candidates/:uid/send', requireAuth, async (req, res) => {
   const userId = req.params.uid;
@@ -518,9 +549,9 @@ app.post('/survey/:uid', async (req, res) => {
     uid: userId, liffId: LIFF_ID, error: msg, success: false, prefill: req.body,
   });
 
-  // バリデーション
-  if (!name || !phone || !store || !employment || !experience) {
-    return renderError('必須項目（氏名・携帯番号・希望店舗・希望雇用形態・美容師経験）を入力してください');
+  // バリデーション（全項目必須）
+  if (!name || !gender || !age || !phone || !station || !store || !employment || !startDate || !experience || !sideshampoo) {
+    return renderError('全ての項目を入力してください');
   }
   if (!/^[0-9]{10,11}$/.test(phone.replace(/[-\s]/g, ''))) {
     return renderError('携帯番号は10〜11桁の数字で入力してください（ハイフン不要）');

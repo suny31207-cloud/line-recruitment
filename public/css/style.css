@@ -97,6 +97,12 @@ tr:hover td { background: #fafbfc; }
 .btn-submit-full { width: 100%; padding: 0.85rem; background: #2d6a4f; color: white; border: none; border-radius: 6px; font-size: 1rem; font-weight: 600; cursor: pointer; margin-top: 0.75rem; transition: background 0.15s; }
 .btn-submit-full:hover { background: #1e4d38; }
 
+/* ===== Candidate Date Rows ===== */
+.date-candidate-row { display: flex; align-items: center; justify-content: space-between; padding: 0.65rem 0.9rem; border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 0.6rem; background: #f8fffe; }
+.candidate-date-text { font-size: 0.9rem; color: #333; font-weight: 500; }
+.btn-approve { padding: 0.35rem 1rem; background: #2d6a4f; color: white; border: none; border-radius: 5px; font-size: 0.8rem; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background 0.15s; }
+.btn-approve:hover { background: #1e4d38; }
+
 /* ===== Change Request Badge ===== */
 .badge-change { background: #fff3cd; color: #856404; border: 1px solid #ffc107; }
 .change-indicator { font-size: 0.75rem; color: #856404; font-weight: 600; margin-left: 0.3rem; }

@@ -70,7 +70,7 @@
           <label>希望雇用形態</label>
           <select name="employment">
             <option value="">選択なし</option>
-            <% ['正社員','パート・アルバイト','業務委託'].forEach(v => { %>
+            <% ['正社員','パート・アルバイト'].forEach(v => { %>
             <option value="<%= v %>" <%= c.employment===v?'selected':'' %>><%= v %></option>
             <% }) %>
           </select>
@@ -151,6 +151,36 @@
 
     <button type="submit" class="btn-primary">保存する</button>
   </form>
+
+  <!-- 候補日時カード（応募者から届いた場合のみ表示） -->
+  <%
+    const rawNote = c.note || '';
+    const hasCandidateDates = rawNote.includes('【候補日時】');
+    let candidateDates = [];
+    if (hasCandidateDates) {
+      const block = rawNote.substring(rawNote.indexOf('【候補日時】') + '【候補日時】'.length);
+      candidateDates = block.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    }
+    const dateType = c.preference === '見学希望' ? 'visit' : 'interview';
+    const dateTypeLabel = c.preference === '見学希望' ? '見学' : '面接';
+  %>
+  <% if (hasCandidateDates && candidateDates.length > 0) { %>
+  <div class="card" style="margin-top:1.5rem">
+    <h3>候補日時（応募者の回答）</h3>
+    <p class="form-note" style="margin-bottom:1rem">承認ボタンを押すと<%= dateTypeLabel %>予定日が確定し、応募者にLINEで通知されます</p>
+    <% candidateDates.forEach(date => { %>
+    <div class="date-candidate-row">
+      <span class="candidate-date-text"><%= date %></span>
+      <form action="/admin/candidates/<%= c.lineUserId %>/confirm-date" method="POST" style="display:inline">
+        <input type="hidden" name="date" value="<%= date %>">
+        <input type="hidden" name="type" value="<%= dateType %>">
+        <button type="submit" class="btn-approve"
+          onclick="return confirm('「<%= date %>」で日程を確定し、LINEで通知しますか？')">承認して通知</button>
+      </form>
+    </div>
+    <% }) %>
+  </div>
+  <% } %>
 
   <!-- LINE送信 -->
   <div class="card" style="margin-top:1.5rem">
