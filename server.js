@@ -64,6 +64,7 @@ const HEADERS = [
   '面接予定日', '回答日時', '回答結果', '最終LINE送信日時', '備考',
 ];
 const STATUSES = ['未対応', '見学対応済み', '面接対応済み', '対応完了'];
+const STORES = ['三軒茶屋店','経堂店','桜新町店','溝口店','阿佐ヶ谷店','都立大学店','学芸大学店','高円寺店','たまプラーザ店','町田店','表参道店'];
 
 function nowJST() {
   return new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
@@ -394,6 +395,7 @@ app.get('/admin', requireAuth, async (req, res) => {
           answer:          r[COL.回答結果],
           lastSent:        r[COL.最終LINE送信日時],
           registeredAt:    r[COL.登録日時],
+          store:           r[COL.希望店舗],
           surveyDone:      !!(r[COL.携帯番号] || r[COL.希望店舗]),
           changeRequested: note.includes('日程変更希望'),
         };
@@ -422,7 +424,7 @@ app.get('/admin/candidates/:uid', requireAuth, async (req, res) => {
       lastSent: r[COL.最終LINE送信日時], note: r[COL.備考],
       registeredAt: r[COL.登録日時],
     };
-    res.render('admin/detail', { c, statuses: STATUSES, msg: req.query.msg || '' });
+    res.render('admin/detail', { c, statuses: STATUSES, stores: STORES, msg: req.query.msg || '' });
   } catch (e) { res.status(500).send('エラー: ' + e.message); }
 });
 
@@ -535,7 +537,7 @@ app.post('/admin/candidates/:uid/send', requireAuth, async (req, res) => {
 // ===== アンケートフォーム（GET）=====
 app.get('/survey/:uid', (req, res) => {
   res.render('survey', {
-    uid: req.params.uid, liffId: LIFF_ID,
+    uid: req.params.uid, liffId: LIFF_ID, stores: STORES,
     error: null, success: false, prefill: {},
   });
 });
@@ -546,7 +548,7 @@ app.post('/survey/:uid', async (req, res) => {
   const { name, gender, age, phone, station, store, employment, startDate, experience, sideshampoo } = req.body;
 
   const renderError = (msg) => res.render('survey', {
-    uid: userId, liffId: LIFF_ID, error: msg, success: false, prefill: req.body,
+    uid: userId, liffId: LIFF_ID, stores: STORES, error: msg, success: false, prefill: req.body,
   });
 
   // バリデーション（全項目必須）
@@ -575,7 +577,7 @@ app.post('/survey/:uid', async (req, res) => {
       await upsertCandidate(userId, { [COL.最終LINE送信日時]: nowJST() });
     } catch (e) { console.warn('[WARN] アンケート後LINE送信失敗:', e.message); }
 
-    res.render('survey', { uid: userId, liffId: LIFF_ID, error: null, success: true, prefill: {} });
+    res.render('survey', { uid: userId, liffId: LIFF_ID, stores: STORES, error: null, success: true, prefill: {} });
   } catch (e) {
     console.error('[ERROR] アンケート保存失敗:', e.message);
     renderError('エラーが発生しました。もう一度お試しください。');

@@ -59,8 +59,14 @@
               <span class="badge badge-pending">未回答</span>
             <% } %>
           </td>
-          <td><%= c.visitDate || '-' %></td>
-          <td><%= c.interviewDate || '-' %></td>
+          <td>
+            <%= c.visitDate || '-' %>
+            <% if (c.store) { %><div class="small-text"><%= c.store %></div><% } %>
+          </td>
+          <td>
+            <%= c.interviewDate || '-' %>
+            <% if (c.store) { %><div class="small-text"><%= c.store %></div><% } %>
+          </td>
           <td>
             <% if (c.answer) { %>
               <span class="answer-badge answer-<%= c.answer === '入社希望' ? 'join' : 'decline' %>">

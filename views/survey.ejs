@@ -73,8 +73,12 @@
 
       <div class="form-group">
         <label class="required">希望店舗</label>
-        <input type="text" name="store" value="<%= prefill.store || '' %>"
-               placeholder="○○店" required>
+        <select name="store" required>
+          <option value="">選択してください</option>
+          <% stores.forEach(v => { %>
+          <option value="<%= v %>" <%= (prefill.store||'')=== v ?'selected':'' %>><%= v %></option>
+          <% }) %>
+        </select>
       </div>
 
       <div class="form-group">
