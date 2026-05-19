@@ -4,6 +4,7 @@ const express = require('express');
 const session = require('express-session');
 const line = require('@line/bot-sdk');
 const { google } = require('googleapis');
+const nodemailer = require('nodemailer');
 const path = require('path');
 
 const app = express();
@@ -66,6 +67,16 @@ const HEADERS = [
 const STATUSES = ['未対応', '見学対応済み', '面接対応済み', '対応完了'];
 const STORES = ['三軒茶屋店','経堂店','桜新町店','溝口店','阿佐ヶ谷店','都立大学店','学芸大学店','高円寺店','たまプラーザ店','町田店','表参道店'];
 
+// ===== 管理者シート定義 =====
+const ADMIN_SHEET = '管理者';
+const ACOL = { 登録日時: 0, ID: 1, パスワード: 2, 名前: 3, メールアドレス: 4 };
+
+// ===== メール設定 =====
+const mailer = nodemailer.createTransport({
+  service: 'gmail',
+  auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
+});
+
 function nowJST() {
   return new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
 }
@@ -111,6 +122,54 @@ async function updateRow(rowIndex, values) {
     valueInputOption: 'USER_ENTERED',
     requestBody: { values: [padRow(values)] },
   });
+}
+
+// ===== 管理者シート操作 =====
+async function getAdminSheetData() {
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: SHEET_ID,
+    range: `${ADMIN_SHEET}!A:E`,
+  });
+  return res.data.values || [];
+}
+
+async function getAllAdminEmails() {
+  const emails = new Set();
+  if (process.env.NOTIFY_EMAIL_TO) process.env.NOTIFY_EMAIL_TO.split(',').forEach(e => emails.add(e.trim()));
+  try {
+    const data = await getAdminSheetData();
+    for (let i = 1; i < data.length; i++) {
+      const email = (data[i] || [])[ACOL.メールアドレス];
+      if (email) emails.add(email.trim());
+    }
+  } catch (e) {}
+  return [...emails];
+}
+
+async function findAdminAccount(id) {
+  try {
+    const data = await getAdminSheetData();
+    for (let i = 1; i < data.length; i++) {
+      if ((data[i] || [])[ACOL.ID] === id) return { rowIndex: i, row: data[i] };
+    }
+  } catch (e) {}
+  return null;
+}
+
+// ===== メール通知 =====
+async function sendNotification(subject, body) {
+  if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) return;
+  try {
+    const to = await getAllAdminEmails();
+    if (!to.length) return;
+    await mailer.sendMail({
+      from: `COLOR KITCHEN 採用システム <${process.env.GMAIL_USER}>`,
+      to: to.join(','),
+      subject,
+      text: body,
+    });
+    console.log(`[EMAIL] 送信完了: ${subject}`);
+  } catch (e) { console.error('[ERROR] メール送信失敗:', e.message); }
 }
 
 // LINEユーザーIDをキーに追加 or 更新
@@ -294,13 +353,23 @@ async function handlePostback(event) {
     const replyText = action === 'join'
       ? 'ご回答ありがとうございます。\n「入社を希望する」として受付いたしました。\n担当者より改めてご連絡いたします。'
       : 'ご回答ありがとうございます。\n「辞退する」として受付いたしました。\nこの度はご検討いただき、誠にありがとうございました。';
+    const answerTime = nowJST();
     try {
       await upsertCandidate(userId, {
-        [COL.回答日時]: nowJST(),
+        [COL.回答日時]: answerTime,
         [COL.回答結果]: result,
         [COL.現在ステータス]: '対応完了',
       });
       console.log(`[ANSWER] ${userId} → ${result}`);
+      // 入社/辞退メール通知
+      const answerRow = await findRowByUserId(userId);
+      const answerName = answerRow ? padRow(answerRow.rowData)[COL.氏名] : userId;
+      await sendNotification(
+        `【採用回答】${answerName}様より「${result}」の回答がありました`,
+        `${answerName}様より回答がありました。\n\n` +
+        `回答結果：${result}\n回答日時：${answerTime}\n\n` +
+        `▼ 管理画面\n${APP_URL}/admin/candidates/${userId}`
+      );
     } catch (e) { console.error('[ERROR] sheets書き込み失敗:', e.message); }
     await client.replyMessage(event.replyToken, [{ type: 'text', text: replyText }]);
     return;
@@ -357,14 +426,26 @@ app.get('/admin/login', (req, res) => {
   res.render('admin/login', { error: null });
 });
 
-app.post('/admin/login', (req, res) => {
+app.post('/admin/login', async (req, res) => {
   const { id, password } = req.body;
+  // マスター管理者チェック（env var）
   if (id === (process.env.ADMIN_ID || 'admin') && password === (process.env.ADMIN_PASSWORD || 'colorkitchen2026')) {
     req.session.adminLoggedIn = true;
-    res.redirect('/admin');
-  } else {
-    res.render('admin/login', { error: 'IDまたはパスワードが違います' });
+    req.session.adminId = id;
+    req.session.isMaster = true;
+    return res.redirect('/admin');
   }
+  // シート上の管理者アカウントチェック
+  try {
+    const found = await findAdminAccount(id);
+    if (found && (found.row || [])[ACOL.パスワード] === password) {
+      req.session.adminLoggedIn = true;
+      req.session.adminId = id;
+      req.session.isMaster = false;
+      return res.redirect('/admin');
+    }
+  } catch (e) { console.error('[ERROR] 管理者シート参照失敗:', e.message); }
+  res.render('admin/login', { error: 'IDまたはパスワードが違います' });
 });
 
 app.get('/admin/logout', (req, res) => {
@@ -376,6 +457,51 @@ function requireAuth(req, res, next) {
   if (req.session.adminLoggedIn) return next();
   res.redirect('/admin/login');
 }
+
+// ===== 管理者設定 =====
+app.get('/admin/settings', requireAuth, async (req, res) => {
+  try {
+    let admins = [];
+    const data = await getAdminSheetData();
+    admins = data.slice(1).map(row => ({
+      id: row[ACOL.ID] || '', name: row[ACOL.名前] || '', email: row[ACOL.メールアドレス] || '', registeredAt: row[ACOL.登録日時] || '',
+    })).filter(a => a.id);
+    res.render('admin/settings', { admins, msg: req.query.msg || '', error: null, isMaster: req.session.isMaster });
+  } catch (e) { res.status(500).send('エラー: ' + e.message); }
+});
+
+app.post('/admin/settings/add', requireAuth, async (req, res) => {
+  const { id, password, name, email } = req.body;
+  if (!id || !password || !name) return res.redirect('/admin/settings?msg=' + encodeURIComponent('ID・パスワード・名前は必須です'));
+  try {
+    const existing = await findAdminAccount(id);
+    if (existing) return res.redirect('/admin/settings?msg=' + encodeURIComponent('そのIDは既に使用されています'));
+    if (id === (process.env.ADMIN_ID || 'admin')) return res.redirect('/admin/settings?msg=' + encodeURIComponent('そのIDは使用できません'));
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: SHEET_ID,
+      range: `${ADMIN_SHEET}!A:E`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [[nowJST(), id, password, name, email || '']] },
+    });
+    res.redirect('/admin/settings?msg=' + encodeURIComponent(`${name}（${id}）を追加しました`));
+  } catch (e) { res.status(500).send('エラー: ' + e.message); }
+});
+
+app.post('/admin/settings/delete/:adminId', requireAuth, async (req, res) => {
+  const targetId = req.params.adminId;
+  try {
+    const found = await findAdminAccount(targetId);
+    if (!found) return res.redirect('/admin/settings?msg=' + encodeURIComponent('アカウントが見つかりません'));
+    // 該当行をクリア（空行にする）
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: `${ADMIN_SHEET}!A${found.rowIndex + 1}:E${found.rowIndex + 1}`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [['', '', '', '', '']] },
+    });
+    res.redirect('/admin/settings?msg=' + encodeURIComponent(`${targetId} を削除しました`));
+  } catch (e) { res.status(500).send('エラー: ' + e.message); }
+});
 
 // ===== 管理画面：一覧 =====
 app.get('/admin', requireAuth, async (req, res) => {
@@ -568,6 +694,21 @@ app.post('/survey/:uid', async (req, res) => {
       [COL.美容師経験]: experience, [COL.サイドシャンプーありなし]: sideshampoo || '',
     });
 
+    // アンケート完了 → メール通知
+    const notifyRow = (await findRowByUserId(userId))?.rowData || [];
+    const nr = padRow(notifyRow);
+    const candidateDatesNote = (nr[COL.備考] || '').includes('【候補日時】')
+      ? '\n\n' + nr[COL.備考].replace('__AWAITING_DATES', '')
+      : '';
+    await sendNotification(
+      `【採用アンケート】新規回答：${name}`,
+      `${name}様よりアンケートの回答がありました。\n\n` +
+      `氏名：${name}\n希望内容：${nr[COL.希望内容] || '-'}\n希望店舗：${store}\n` +
+      `携帯番号：${phone}\n美容師経験：${experience}` +
+      `${candidateDatesNote}\n\n` +
+      `▼ 管理画面\n${APP_URL}/admin/candidates/${userId}`
+    );
+
     // アンケート完了 → 確認メッセージ送信
     try {
       await client.pushMessage(userId, {
@@ -611,7 +752,30 @@ async function initSheetHeader() {
   }
 }
 
+async function initAdminSheet() {
+  try {
+    const data = await getAdminSheetData();
+    if (!data || data.length === 0) {
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: SHEET_ID, range: `${ADMIN_SHEET}!A:E`, valueInputOption: 'USER_ENTERED',
+        requestBody: { values: [['登録日時', '管理者ID', 'パスワード', '名前', 'メールアドレス']] },
+      });
+    }
+  } catch (e) {
+    try {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: SHEET_ID, requestBody: { requests: [{ addSheet: { properties: { title: ADMIN_SHEET } } }] },
+      });
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: SHEET_ID, range: `${ADMIN_SHEET}!A:E`, valueInputOption: 'USER_ENTERED',
+        requestBody: { values: [['登録日時', '管理者ID', 'パスワード', '名前', 'メールアドレス']] },
+      });
+    } catch (e2) { console.warn('[WARN] 管理者シート作成失敗:', e2.message); }
+  }
+}
+
 app.listen(PORT, async () => {
   console.log(`サーバー起動中: http://localhost:${PORT}`);
   try { await initSheetHeader(); } catch (e) { console.warn('[WARN]', e.message); }
+  try { await initAdminSheet(); } catch (e) { console.warn('[WARN] 管理者シート:', e.message); }
 });

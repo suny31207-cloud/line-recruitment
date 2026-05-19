@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>管理者設定 - COLOR KITCHEN</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<header>
+  <div class="header-inner" style="display:flex;align-items:center;justify-content:space-between">
+    <h1>COLOR KITCHEN 採用管理システム</h1>
+    <div style="display:flex;gap:1rem;align-items:center">
+      <a href="/admin" class="logout-link" style="color:#aad4c8">← 応募者一覧</a>
+      <a href="/admin/logout" class="logout-link">ログアウト</a>
+    </div>
+  </div>
+</header>
+<main>
+  <div class="page-header">
+    <h2>管理者設定</h2>
+  </div>
+
+  <% if (msg) { %>
+  <div class="alert alert-<%= msg.includes('追加') ? 'success' : msg.includes('削除') ? 'success' : 'error' %>"><%= msg %></div>
+  <% } %>
+
+  <!-- 管理者アカウント一覧 -->
+  <div class="card">
+    <h3>管理者アカウント一覧</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>管理者ID</th>
+            <th>名前</th>
+            <th>メールアドレス（通知先）</th>
+            <th>登録日時</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>admin（マスター）</strong></td>
+            <td>管理者</td>
+            <td class="small-text"><%= process.env ? '環境変数で設定' : '-' %></td>
+            <td class="small-text">-</td>
+            <td><span style="font-size:0.75rem;color:#aaa">削除不可</span></td>
+          </tr>
+          <% if (admins.length === 0) { %>
+          <tr><td colspan="5" class="empty-row">追加アカウントなし</td></tr>
+          <% } %>
+          <% admins.forEach(a => { %>
+          <tr>
+            <td><strong><%= a.id %></strong></td>
+            <td><%= a.name %></td>
+            <td class="small-text"><%= a.email || '-' %></td>
+            <td class="small-text"><%= a.registeredAt || '-' %></td>
+            <td>
+              <form action="/admin/settings/delete/<%= a.id %>" method="POST" style="display:inline"
+                onsubmit="return confirm('<%= a.name %>（<%= a.id %>）を削除しますか？')">
+                <button type="submit" class="btn-delete">削除</button>
+              </form>
+            </td>
+          </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- アカウント追加 -->
+  <div class="card">
+    <h3>アカウントを追加</h3>
+    <form action="/admin/settings/add" method="POST">
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="required">管理者ID</label>
+          <input type="text" name="id" placeholder="例: staff01" required>
+          <small>半角英数字・記号</small>
+        </div>
+        <div class="form-group">
+          <label class="required">パスワード</label>
+          <input type="text" name="password" placeholder="例: pass1234" required>
+        </div>
+        <div class="form-group">
+          <label class="required">名前</label>
+          <input type="text" name="name" placeholder="例: 山田 太郎" required>
+        </div>
+        <div class="form-group">
+          <label>メールアドレス（通知先）</label>
+          <input type="email" name="email" placeholder="例: staff@example.com">
+          <small>入力するとアンケート・回答通知が届きます</small>
+        </div>
+      </div>
+      <button type="submit" class="btn-primary">追加する</button>
+    </form>
+  </div>
+
+  <!-- メール通知の説明 -->
+  <div class="card">
+    <h3>メール通知について</h3>
+    <p style="font-size:0.88rem;color:#555;line-height:1.8">
+      登録されたメールアドレスに以下のタイミングで通知が届きます：<br>
+      ・<strong>アンケート記入完了</strong>時<br>
+      ・<strong>入社希望 / 辞退</strong>の回答受信時<br><br>
+      マスター管理者の通知先は <code>NOTIFY_EMAIL_TO</code> 環境変数で設定してください。
+    </p>
+  </div>
+</main>
+</body>
+</html>

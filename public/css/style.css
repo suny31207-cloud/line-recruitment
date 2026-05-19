@@ -102,6 +102,8 @@ tr:hover td { background: #fafbfc; }
 .candidate-date-text { font-size: 0.9rem; color: #333; font-weight: 500; }
 .btn-approve { padding: 0.35rem 1rem; background: #2d6a4f; color: white; border: none; border-radius: 5px; font-size: 0.8rem; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background 0.15s; }
 .btn-approve:hover { background: #1e4d38; }
+.btn-delete { padding: 0.25rem 0.7rem; background: #dc3545; color: white; border: none; border-radius: 5px; font-size: 0.75rem; cursor: pointer; transition: background 0.15s; }
+.btn-delete:hover { background: #b02a37; }
 
 /* ===== Change Request Badge ===== */
 .badge-change { background: #fff3cd; color: #856404; border: 1px solid #ffc107; }
