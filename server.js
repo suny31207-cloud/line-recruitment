@@ -228,18 +228,37 @@ async function handleMessage(event) {
   const userId = event.source.userId;
   const text = event.message.text?.trim();
 
+  // 見学/面接選択 → 候補日時3つを依頼（備考に状態マーカーをセット）
   if (text === '見学希望' || text === '面接希望') {
-    await upsertCandidate(userId, { [COL.希望内容]: text });
-    // 希望選択後: 承り + アンケートリンク送信
-    await client.replyMessage(event.replyToken, [
-      { type: 'text', text: `「${text}」を承りました！` },
-      buildSurveyLink(userId),
-    ]);
+    await upsertCandidate(userId, {
+      [COL.希望内容]: text,
+      [COL.備考]: '__AWAITING_DATES',
+    });
+    await client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: `「${text}」を承りました！\n\nご都合の良い候補日時を3つ、このチャットに返信してください。\n\n＜例＞\n第1希望：6/5（木）14:00〜\n第2希望：6/7（土）11:00〜\n第3希望：6/8（日）15:00〜`,
+    });
     return;
   }
 
-  // 未登録ユーザーは登録して挨拶 + 希望選択ボタン
   const existing = await findRowByUserId(userId);
+
+  // 候補日時待ち → 日時を備考に記録してアンケート送信
+  if (existing) {
+    const row = padRow(existing.rowData);
+    if ((row[COL.備考] || '').startsWith('__AWAITING_DATES')) {
+      await upsertCandidate(userId, {
+        [COL.備考]: `【候補日時】\n${text}`,
+      });
+      await client.replyMessage(event.replyToken, [
+        { type: 'text', text: '候補日時を承りました！\n続けてアンケートへのご記入をお願いします。' },
+        buildSurveyLink(userId),
+      ]);
+      return;
+    }
+  }
+
+  // 未登録ユーザーは登録して挨拶 + 希望選択ボタン
   if (!existing) {
     let displayName = '応募者';
     try { const p = await client.getProfile(userId); displayName = p.displayName; } catch (e) {}
