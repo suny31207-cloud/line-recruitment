@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= c.name || c.lineUserId %> - COLOR KITCHEN 採用管理</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<header>
+  <div class="header-inner">
+    <h1>COLOR KITCHEN 採用管理システム</h1>
+  </div>
+</header>
+<main>
+  <a href="/admin" class="back-link">← 応募者一覧に戻る</a>
+
+  <% if (msg) { %>
+  <div class="alert alert-success"><%= msg %></div>
+  <% } %>
+
+  <div class="detail-title">
+    <h2><%= c.name || '(名前未登録)' %></h2>
+    <span class="status-badge status-<%= c.status.replace(/\s/g,'') %>"><%= c.status %></span>
+    <div class="sub-text">LINE ID: <%= c.lineUserId %></div>
+  </div>
+
+  <!-- 応募者情報・対応管理フォーム -->
+  <form action="/admin/candidates/<%= c.lineUserId %>" method="POST">
+
+    <!-- アンケート情報 -->
+    <div class="card">
+      <h3>アンケート情報</h3>
+      <div class="grid-3">
+        <div class="form-group">
+          <label class="required">氏名</label>
+          <input type="text" name="name" value="<%= c.name %>">
+        </div>
+        <div class="form-group">
+          <label>性別</label>
+          <select name="gender">
+            <option value="">選択なし</option>
+            <% ['男性','女性','その他','回答しない'].forEach(v => { %>
+            <option value="<%= v %>" <%= c.gender===v?'selected':'' %>><%= v %></option>
+            <% }) %>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>年齢</label>
+          <input type="number" name="age" value="<%= c.age %>" min="15" max="80">
+        </div>
+        <div class="form-group">
+          <label>携帯番号</label>
+          <input type="tel" name="phone" value="<%= c.phone %>">
+        </div>
+        <div class="form-group">
+          <label>最寄駅</label>
+          <input type="text" name="station" value="<%= c.station %>">
+        </div>
+        <div class="form-group">
+          <label>勤務開始希望日</label>
+          <input type="text" name="startDate" value="<%= c.startDate %>">
+        </div>
+        <div class="form-group">
+          <label>希望店舗</label>
+          <input type="text" name="store" value="<%= c.store %>">
+        </div>
+        <div class="form-group">
+          <label>希望雇用形態</label>
+          <select name="employment">
+            <option value="">選択なし</option>
+            <% ['正社員','パート・アルバイト','業務委託'].forEach(v => { %>
+            <option value="<%= v %>" <%= c.employment===v?'selected':'' %>><%= v %></option>
+            <% }) %>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>美容師経験</label>
+          <select name="experience">
+            <option value="">選択なし</option>
+            <% ['あり（5年以上）','あり（3〜5年）','あり（1〜3年）','あり（1年未満）','なし（見習い）','なし'].forEach(v => { %>
+            <option value="<%= v %>" <%= c.experience===v?'selected':'' %>><%= v %></option>
+            <% }) %>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>サイドシャンプー</label>
+          <select name="sideshampoo">
+            <option value="">選択なし</option>
+            <% ['あり','なし'].forEach(v => { %>
+            <option value="<%= v %>" <%= c.sideshampoo===v?'selected':'' %>><%= v %></option>
+            <% }) %>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- 対応管理 -->
+    <div class="card">
+      <h3>対応管理</h3>
+      <div class="grid-3">
+        <div class="form-group">
+          <label>希望内容</label>
+          <select name="preference">
+            <option value="">選択なし</option>
+            <% ['見学希望','面接希望'].forEach(v => { %>
+            <option value="<%= v %>" <%= c.preference===v?'selected':'' %>><%= v %></option>
+            <% }) %>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>現在ステータス</label>
+          <select name="status">
+            <% statuses.forEach(s => { %>
+            <option value="<%= s %>" <%= c.status===s?'selected':'' %>><%= s %></option>
+            <% }) %>
+          </select>
+          <small class="hint">「面接対応済み」に変更すると入社/辞退ボタンを自動送信</small>
+        </div>
+        <div class="form-group">
+          <label>見学予約日</label>
+          <input type="text" name="visitDate" value="<%= c.visitDate %>" placeholder="例: 2026/06/01 14:00">
+        </div>
+        <div class="form-group">
+          <label>面接予定日</label>
+          <input type="text" name="interviewDate" value="<%= c.interviewDate %>" placeholder="例: 2026/06/05 10:00">
+        </div>
+        <div class="form-group">
+          <label>回答結果</label>
+          <input type="text" value="<%= c.answer || '-' %>" readonly class="readonly-field">
+        </div>
+        <div class="form-group">
+          <label>回答日時</label>
+          <input type="text" value="<%= c.answerDate || '-' %>" readonly class="readonly-field">
+        </div>
+        <div class="form-group">
+          <label>最終LINE送信日時</label>
+          <input type="text" value="<%= c.lastSent || '-' %>" readonly class="readonly-field">
+        </div>
+        <div class="form-group">
+          <label>登録日時</label>
+          <input type="text" value="<%= c.registeredAt || '-' %>" readonly class="readonly-field">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>備考</label>
+        <textarea name="note" rows="3"><%= c.note %></textarea>
+      </div>
+    </div>
+
+    <button type="submit" class="btn-primary">保存する</button>
+  </form>
+
+  <!-- LINE送信 -->
+  <div class="card" style="margin-top:1.5rem">
+    <h3>LINE送信</h3>
+    <form action="/admin/candidates/<%= c.lineUserId %>/send" method="POST">
+      <div class="grid-2">
+        <div class="form-group">
+          <label>送信タイプ</label>
+          <select name="messageType" id="msgType" onchange="toggleCustom()">
+            <option value="interview_followup">入社/辞退ボタン（面接後）</option>
+            <option value="choice">見学/面接 希望選択ボタン</option>
+            <option value="custom">カスタムメッセージ</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group" id="customTextGroup" style="display:none">
+        <label>メッセージ内容</label>
+        <textarea name="customText" rows="4" placeholder="送信するメッセージを入力してください"></textarea>
+      </div>
+      <button type="submit" class="btn-secondary">LINEを送信する</button>
+    </form>
+  </div>
+</main>
+
+<script>
+function toggleCustom() {
+  const type = document.getElementById('msgType').value;
+  document.getElementById('customTextGroup').style.display = type === 'custom' ? 'block' : 'none';
+}
+</script>
+</body>
+</html>

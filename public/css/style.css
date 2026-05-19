@@ -1,0 +1,105 @@
+/* ===== Reset & Base ===== */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', sans-serif; background: #f0f2f5; color: #333; font-size: 14px; }
+
+/* ===== Header ===== */
+header { background: #2d6a4f; color: white; padding: 0.9rem 2rem; box-shadow: 0 2px 4px rgba(0,0,0,0.15); }
+.header-inner { max-width: 1400px; margin: 0 auto; }
+header h1 { font-size: 1.1rem; font-weight: 600; }
+
+/* ===== Main ===== */
+main { max-width: 1400px; margin: 0 auto; padding: 1.5rem 2rem; }
+
+/* ===== Page Header ===== */
+.page-header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.25rem; }
+.page-header h2 { font-size: 1.1rem; color: #444; }
+.count-badge { background: #2d6a4f; color: white; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.75rem; }
+
+.detail-title { margin-bottom: 1.5rem; }
+.detail-title h2 { font-size: 1.3rem; margin-bottom: 0.3rem; }
+.sub-text { font-size: 0.75rem; color: #999; margin-top: 0.2rem; }
+
+/* ===== Table ===== */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+th, td { padding: 0.7rem 1rem; text-align: left; border-bottom: 1px solid #eee; white-space: nowrap; }
+th { background: #f7f8fa; font-weight: 600; color: #555; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #fafbfc; }
+.empty-row { text-align: center; color: #aaa; padding: 3rem; font-size: 0.9rem; }
+.small-text { font-size: 0.78rem; color: #888; }
+
+/* ===== Status Badges ===== */
+.status-badge { display: inline-block; padding: 0.25rem 0.7rem; border-radius: 20px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; }
+.status-未対応 { background: #fff3cd; color: #856404; border: 1px solid #ffc107; }
+.status-見学対応済み { background: #cfe2ff; color: #084298; border: 1px solid #9ec5fe; }
+.status-面接対応済み { background: #f8d7da; color: #842029; border: 1px solid #f5c2c7; }
+.status-対応完了 { background: #d1e7dd; color: #0a3622; border: 1px solid #a3cfbb; }
+
+/* ===== Survey/Answer Badges ===== */
+.badge { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 10px; font-size: 0.72rem; font-weight: 600; }
+.badge-done { background: #d1e7dd; color: #0a3622; }
+.badge-pending { background: #e9ecef; color: #6c757d; }
+.answer-badge { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 10px; font-size: 0.72rem; font-weight: 600; }
+.answer-join { background: #d1e7dd; color: #0a3622; }
+.answer-decline { background: #f8d7da; color: #842029; }
+
+/* ===== Buttons ===== */
+.btn { display: inline-block; padding: 0.35rem 0.9rem; background: #2d6a4f; color: white; text-decoration: none; border-radius: 5px; font-size: 0.8rem; transition: background 0.15s; }
+.btn:hover { background: #1e4d38; }
+.btn-sm { padding: 0.25rem 0.7rem; font-size: 0.75rem; }
+.btn-primary { padding: 0.6rem 2rem; background: #2d6a4f; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 0.95rem; font-weight: 600; transition: background 0.15s; }
+.btn-primary:hover { background: #1e4d38; }
+.btn-secondary { padding: 0.55rem 1.5rem; background: #495057; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 0.9rem; transition: background 0.15s; }
+.btn-secondary:hover { background: #343a40; }
+
+/* ===== Card ===== */
+.card { background: white; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.25rem; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+.card h3 { font-size: 0.9rem; font-weight: 700; color: #2d6a4f; border-left: 3px solid #2d6a4f; padding-left: 0.6rem; margin-bottom: 1.25rem; }
+
+/* ===== Grid ===== */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; }
+@media (max-width: 900px) { .grid-3 { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 600px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+
+/* ===== Form ===== */
+.form-group { margin-bottom: 0.9rem; }
+.form-group label { display: block; margin-bottom: 0.35rem; font-size: 0.82rem; font-weight: 600; color: #555; }
+.form-group input, .form-group select, .form-group textarea {
+  width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #ced4da; border-radius: 5px;
+  font-size: 0.88rem; background: white; transition: border-color 0.15s;
+}
+.form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+  outline: none; border-color: #2d6a4f; box-shadow: 0 0 0 2px rgba(45,106,79,0.1);
+}
+.form-group small { display: block; margin-top: 0.25rem; font-size: 0.75rem; color: #6c757d; }
+.readonly-field { background: #f8f9fa !important; color: #666; cursor: not-allowed; }
+.required::after { content: " *"; color: #dc3545; }
+.hint { display: block; margin-top: 0.3rem; font-size: 0.72rem; color: #dc3545; }
+
+/* ===== Alert ===== */
+.alert { padding: 0.75rem 1rem; border-radius: 5px; margin-bottom: 1.25rem; font-size: 0.88rem; }
+.alert-success { background: #d1e7dd; color: #0a3622; border: 1px solid #a3cfbb; }
+.alert-error { background: #f8d7da; color: #842029; border: 1px solid #f5c2c7; }
+
+/* ===== Back Link ===== */
+.back-link { display: inline-flex; align-items: center; gap: 0.3rem; color: #2d6a4f; text-decoration: none; margin-bottom: 1.25rem; font-size: 0.88rem; font-weight: 500; }
+.back-link:hover { text-decoration: underline; }
+
+/* ===== Survey ===== */
+.survey-container { max-width: 560px; margin: 1.5rem auto; padding: 0 1rem; }
+.survey-header { background: #2d6a4f; color: white; padding: 1.5rem; border-radius: 8px 8px 0 0; text-align: center; }
+.survey-header h2 { font-size: 1.1rem; margin-bottom: 0.4rem; }
+.survey-header p { font-size: 0.85rem; opacity: 0.85; }
+.survey-body { background: white; padding: 1.5rem; border-radius: 0 0 8px 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+.form-note { font-size: 0.78rem; color: #6c757d; margin-bottom: 1.25rem; }
+.btn-submit-full { width: 100%; padding: 0.85rem; background: #2d6a4f; color: white; border: none; border-radius: 6px; font-size: 1rem; font-weight: 600; cursor: pointer; margin-top: 0.75rem; transition: background 0.15s; }
+.btn-submit-full:hover { background: #1e4d38; }
+
+/* ===== Success Box ===== */
+.success-box { text-align: center; padding: 2.5rem 1.5rem; }
+.success-icon { font-size: 3rem; margin-bottom: 1rem; }
+.success-box h3 { color: #0a3622; font-size: 1.2rem; margin-bottom: 0.75rem; }
+.success-box p { color: #555; font-size: 0.9rem; }
+.success-note { margin-top: 1rem; background: #d1e7dd; padding: 0.75rem; border-radius: 6px; font-size: 0.88rem; color: #0a3622; }

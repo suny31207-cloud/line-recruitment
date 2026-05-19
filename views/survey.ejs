@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>採用アンケート - COLOR KITCHEN</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <% if (liffId) { %>
+  <script src="https://static.line-scdn.net/liff/edge/versions/2.22.3/sdk.js"></script>
+  <% } %>
+</head>
+<body>
+<div class="survey-container">
+  <div class="survey-header">
+    <h2>COLOR KITCHEN 採用アンケート</h2>
+    <p>ご回答よろしくお願いします</p>
+  </div>
+  <div class="survey-body">
+
+    <% if (success) { %>
+    <div class="success-box">
+      <div class="success-icon">✅</div>
+      <h3>送信完了しました</h3>
+      <p>アンケートのご回答ありがとうございました。</p>
+      <p class="success-note">LINEに戻って<strong>「見学希望」または「面接希望」</strong>をお選びください。</p>
+    </div>
+
+    <% } else { %>
+
+    <% if (error) { %>
+    <div class="alert alert-error"><%= error %></div>
+    <% } %>
+
+    <p class="form-note">【必須】のついた項目は必ず入力してください</p>
+
+    <form action="/survey/<%= uid %>" method="POST" novalidate>
+
+      <div class="form-group">
+        <label class="required">氏名</label>
+        <input type="text" name="name" value="<%= prefill.name || '' %>"
+               placeholder="山田 太郎" required>
+      </div>
+
+      <div class="grid-2">
+        <div class="form-group">
+          <label>性別（任意）</label>
+          <select name="gender">
+            <option value="">選択なし</option>
+            <% ['男性','女性','その他','回答しない'].forEach(v => { %>
+            <option value="<%= v %>" <%= (prefill.gender||'')=== v ?'selected':'' %>><%= v %></option>
+            <% }) %>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>年齢（任意）</label>
+          <input type="number" name="age" value="<%= prefill.age || '' %>"
+                 min="15" max="80" placeholder="25">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="required">携帯番号</label>
+        <input type="tel" name="phone" value="<%= prefill.phone || '' %>"
+               placeholder="09012345678" required>
+        <small>ハイフンなし 10〜11桁</small>
+      </div>
+
+      <div class="form-group">
+        <label>最寄駅（任意）</label>
+        <input type="text" name="station" value="<%= prefill.station || '' %>"
+               placeholder="渋谷駅">
+      </div>
+
+      <div class="form-group">
+        <label class="required">希望店舗</label>
+        <input type="text" name="store" value="<%= prefill.store || '' %>"
+               placeholder="○○店" required>
+      </div>
+
+      <div class="form-group">
+        <label class="required">希望雇用形態</label>
+        <select name="employment" required>
+          <option value="">選択してください</option>
+          <% ['正社員','パート・アルバイト','業務委託'].forEach(v => { %>
+          <option value="<%= v %>" <%= (prefill.employment||'')=== v ?'selected':'' %>><%= v %></option>
+          <% }) %>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>勤務開始希望日（任意）</label>
+        <input type="text" name="startDate" value="<%= prefill.startDate || '' %>"
+               placeholder="2026年7月〜 など">
+      </div>
+
+      <div class="form-group">
+        <label class="required">美容師経験</label>
+        <select name="experience" required>
+          <option value="">選択してください</option>
+          <% ['あり（5年以上）','あり（3〜5年）','あり（1〜3年）','あり（1年未満）','なし（見習い）','なし'].forEach(v => { %>
+          <option value="<%= v %>" <%= (prefill.experience||'')=== v ?'selected':'' %>><%= v %></option>
+          <% }) %>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>サイドシャンプーの経験（任意）</label>
+        <select name="sideshampoo">
+          <option value="">選択なし</option>
+          <% ['あり','なし'].forEach(v => { %>
+          <option value="<%= v %>" <%= (prefill.sideshampoo||'')=== v ?'selected':'' %>><%= v %></option>
+          <% }) %>
+        </select>
+      </div>
+
+      <button type="submit" class="btn-submit-full">アンケートを送信する</button>
+    </form>
+
+    <% } %>
+  </div>
+</div>
+
+<% if (liffId) { %>
+<script>
+liff.init({ liffId: '<%= liffId %>' }).catch(err => console.warn('LIFF init failed:', err));
+</script>
+<% } %>
+</body>
+</html>

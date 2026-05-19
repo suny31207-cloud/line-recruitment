@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>応募者一覧 - COLOR KITCHEN 採用管理</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<header>
+  <div class="header-inner">
+    <h1>COLOR KITCHEN 採用管理システム</h1>
+  </div>
+</header>
+<main>
+  <div class="page-header">
+    <h2>応募者一覧 <span class="count-badge"><%= candidates.length %>名</span></h2>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>応募者名</th>
+          <th>希望内容</th>
+          <th>ステータス</th>
+          <th>アンケート</th>
+          <th>見学予約日</th>
+          <th>面接予定日</th>
+          <th>回答結果</th>
+          <th>登録日時</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% if (candidates.length === 0) { %>
+        <tr>
+          <td colspan="9" class="empty-row">応募者がいません</td>
+        </tr>
+        <% } %>
+        <% candidates.forEach(c => { %>
+        <tr>
+          <td>
+            <strong><%= c.name || '(名前未登録)' %></strong>
+            <div class="sub-text"><%= c.lineUserId %></div>
+          </td>
+          <td><%= c.preference || '-' %></td>
+          <td>
+            <span class="status-badge status-<%= c.status.replace(/\s/g,'') %>">
+              <%= c.status %>
+            </span>
+          </td>
+          <td>
+            <% if (c.surveyDone) { %>
+              <span class="badge badge-done">回答済み</span>
+            <% } else { %>
+              <span class="badge badge-pending">未回答</span>
+            <% } %>
+          </td>
+          <td><%= c.visitDate || '-' %></td>
+          <td><%= c.interviewDate || '-' %></td>
+          <td>
+            <% if (c.answer) { %>
+              <span class="answer-badge answer-<%= c.answer === '入社希望' ? 'join' : 'decline' %>">
+                <%= c.answer %>
+              </span>
+            <% } else { %>-<% } %>
+          </td>
+          <td class="small-text"><%= c.registeredAt || '-' %></td>
+          <td>
+            <a href="/admin/candidates/<%= c.lineUserId %>" class="btn btn-sm">詳細</a>
+          </td>
+        </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+</main>
+</body>
+</html>
