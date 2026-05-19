@@ -22,10 +22,11 @@
   </div>
 
   <% if (msg) { %>
-  <div class="alert alert-<%= msg.includes('追加') ? 'success' : msg.includes('削除') ? 'success' : 'error' %>"><%= msg %></div>
+  <div class="alert alert-<%= msg.includes('更新') || msg.includes('追加') || msg.includes('削除') ? 'success' : 'error' %>"><%= msg %></div>
   <% } %>
 
   <!-- 管理者アカウント一覧 -->
+  <% if (!editAdmin) { %>
   <div class="card">
     <h3>管理者アカウント一覧</h3>
     <div class="table-wrap">
@@ -43,7 +44,7 @@
           <tr>
             <td><strong>admin（マスター）</strong></td>
             <td>管理者</td>
-            <td class="small-text"><%= process.env ? '環境変数で設定' : '-' %></td>
+            <td class="small-text">環境変数で設定</td>
             <td class="small-text">-</td>
             <td><span style="font-size:0.75rem;color:#aaa">削除不可</span></td>
           </tr>
@@ -56,7 +57,8 @@
             <td><%= a.name %></td>
             <td class="small-text"><%= a.email || '-' %></td>
             <td class="small-text"><%= a.registeredAt || '-' %></td>
-            <td>
+            <td style="display:flex;gap:0.4rem;align-items:center">
+              <a href="/admin/settings/edit/<%= a.id %>" class="btn btn-sm">編集</a>
               <form action="/admin/settings/delete/<%= a.id %>" method="POST" style="display:inline"
                 onsubmit="return confirm('<%= a.name %>（<%= a.id %>）を削除しますか？')">
                 <button type="submit" class="btn-delete">削除</button>
@@ -107,6 +109,41 @@
       マスター管理者の通知先は <code>NOTIFY_EMAIL_TO</code> 環境変数で設定してください。
     </p>
   </div>
+  <% } %>
+
+  <!-- 編集フォーム（editAdminがある場合） -->
+  <% if (editAdmin) { %>
+  <div class="card">
+    <h3>アカウントを編集</h3>
+    <form action="/admin/settings/edit/<%= editAdmin.id %>" method="POST">
+      <div class="grid-2">
+        <div class="form-group">
+          <label>管理者ID</label>
+          <input type="text" value="<%= editAdmin.id %>" readonly class="readonly-field">
+          <small>IDは変更できません</small>
+        </div>
+        <div class="form-group">
+          <label>パスワード</label>
+          <input type="text" name="password" placeholder="変更しない場合は空欄">
+          <small>空欄のままにすると現在のパスワードを維持</small>
+        </div>
+        <div class="form-group">
+          <label class="required">名前</label>
+          <input type="text" name="name" value="<%= editAdmin.name %>" required>
+        </div>
+        <div class="form-group">
+          <label>メールアドレス（通知先）</label>
+          <input type="email" name="email" value="<%= editAdmin.email %>">
+        </div>
+      </div>
+      <div style="display:flex;gap:0.75rem;margin-top:0.5rem">
+        <button type="submit" class="btn-primary">保存する</button>
+        <a href="/admin/settings" class="btn-secondary" style="display:inline-flex;align-items:center;text-decoration:none">キャンセル</a>
+      </div>
+    </form>
+  </div>
+  <% } %>
+
 </main>
 </body>
 </html>

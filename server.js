@@ -466,7 +466,7 @@ app.get('/admin/settings', requireAuth, async (req, res) => {
     admins = data.slice(1).map(row => ({
       id: row[ACOL.ID] || '', name: row[ACOL.名前] || '', email: row[ACOL.メールアドレス] || '', registeredAt: row[ACOL.登録日時] || '',
     })).filter(a => a.id);
-    res.render('admin/settings', { admins, msg: req.query.msg || '', error: null, isMaster: req.session.isMaster });
+    res.render('admin/settings', { admins, msg: req.query.msg || '', error: null, isMaster: req.session.isMaster, editAdmin: null });
   } catch (e) { res.status(500).send('エラー: ' + e.message); }
 });
 
@@ -484,6 +484,45 @@ app.post('/admin/settings/add', requireAuth, async (req, res) => {
       requestBody: { values: [[nowJST(), id, password, name, email || '']] },
     });
     res.redirect('/admin/settings?msg=' + encodeURIComponent(`${name}（${id}）を追加しました`));
+  } catch (e) { res.status(500).send('エラー: ' + e.message); }
+});
+
+app.get('/admin/settings/edit/:adminId', requireAuth, async (req, res) => {
+  const targetId = req.params.adminId;
+  try {
+    const found = await findAdminAccount(targetId);
+    if (!found) return res.redirect('/admin/settings?msg=' + encodeURIComponent('アカウントが見つかりません'));
+    const row = found.row || [];
+    res.render('admin/settings', {
+      admins: [],
+      msg: '',
+      error: null,
+      isMaster: req.session.isMaster,
+      editAdmin: { id: row[ACOL.ID] || '', name: row[ACOL.名前] || '', email: row[ACOL.メールアドレス] || '' },
+    });
+  } catch (e) { res.status(500).send('エラー: ' + e.message); }
+});
+
+app.post('/admin/settings/edit/:adminId', requireAuth, async (req, res) => {
+  const targetId = req.params.adminId;
+  const { password, name, email } = req.body;
+  if (!name) return res.redirect(`/admin/settings/edit/${targetId}?msg=` + encodeURIComponent('名前は必須です'));
+  try {
+    const found = await findAdminAccount(targetId);
+    if (!found) return res.redirect('/admin/settings?msg=' + encodeURIComponent('アカウントが見つかりません'));
+    const row = [...(found.row || [])];
+    while (row.length < 5) row.push('');
+    // パスワードが空の場合は既存を維持
+    row[ACOL.パスワード] = password || row[ACOL.パスワード];
+    row[ACOL.名前] = name;
+    row[ACOL.メールアドレス] = email || '';
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: `${ADMIN_SHEET}!A${found.rowIndex + 1}:E${found.rowIndex + 1}`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [row] },
+    });
+    res.redirect('/admin/settings?msg=' + encodeURIComponent(`${name}（${targetId}）を更新しました`));
   } catch (e) { res.status(500).send('エラー: ' + e.message); }
 });
 
