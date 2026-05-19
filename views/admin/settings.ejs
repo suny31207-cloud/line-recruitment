@@ -42,11 +42,14 @@
         </thead>
         <tbody>
           <tr>
-            <td><strong>admin（マスター）</strong></td>
-            <td>管理者</td>
-            <td class="small-text">環境変数で設定</td>
-            <td class="small-text">-</td>
-            <td><span style="font-size:0.75rem;color:#aaa">削除不可</span></td>
+            <td><strong><%= masterAdminId %>（マスター）</strong></td>
+            <td><%= masterInfo ? masterInfo.name : '管理者' %></td>
+            <td class="small-text"><%= masterInfo ? (masterInfo.email || '未設定') : '環境変数で設定' %></td>
+            <td class="small-text"><%= masterInfo ? (masterInfo.registeredAt || '-') : '-' %></td>
+            <td style="display:flex;gap:0.4rem;align-items:center">
+              <a href="/admin/settings/edit/<%= masterAdminId %>" class="btn btn-sm">編集</a>
+              <span style="font-size:0.75rem;color:#aaa">削除不可</span>
+            </td>
           </tr>
           <% if (admins.length === 0) { %>
           <tr><td colspan="5" class="empty-row">追加アカウントなし</td></tr>

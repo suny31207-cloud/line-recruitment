@@ -428,23 +428,27 @@ app.get('/admin/login', (req, res) => {
 
 app.post('/admin/login', async (req, res) => {
   const { id, password } = req.body;
-  // マスター管理者チェック（env var）
-  if (id === (process.env.ADMIN_ID || 'admin') && password === (process.env.ADMIN_PASSWORD || 'colorkitchen2026')) {
+  const masterId = process.env.ADMIN_ID || 'admin';
+  try {
+    const found = await findAdminAccount(id);
+    if (found) {
+      // シートに登録済み → シートのパスワードのみ有効（env varは無効）
+      if ((found.row || [])[ACOL.パスワード] === password) {
+        req.session.adminLoggedIn = true;
+        req.session.adminId = id;
+        req.session.isMaster = (id === masterId);
+        return res.redirect('/admin');
+      }
+      return res.render('admin/login', { error: 'IDまたはパスワードが違います' });
+    }
+  } catch (e) { console.error('[ERROR] 管理者シート参照失敗:', e.message); }
+  // シート未登録のマスター管理者 → env var フォールバック
+  if (id === masterId && password === (process.env.ADMIN_PASSWORD || 'colorkitchen2026')) {
     req.session.adminLoggedIn = true;
     req.session.adminId = id;
     req.session.isMaster = true;
     return res.redirect('/admin');
   }
-  // シート上の管理者アカウントチェック
-  try {
-    const found = await findAdminAccount(id);
-    if (found && (found.row || [])[ACOL.パスワード] === password) {
-      req.session.adminLoggedIn = true;
-      req.session.adminId = id;
-      req.session.isMaster = false;
-      return res.redirect('/admin');
-    }
-  } catch (e) { console.error('[ERROR] 管理者シート参照失敗:', e.message); }
   res.render('admin/login', { error: 'IDまたはパスワードが違います' });
 });
 
@@ -460,13 +464,20 @@ function requireAuth(req, res, next) {
 
 // ===== 管理者設定 =====
 app.get('/admin/settings', requireAuth, async (req, res) => {
+  const masterId = process.env.ADMIN_ID || 'admin';
   try {
     let admins = [];
+    let masterInfo = null;
     const data = await getAdminSheetData();
     admins = data.slice(1).map(row => ({
       id: row[ACOL.ID] || '', name: row[ACOL.名前] || '', email: row[ACOL.メールアドレス] || '', registeredAt: row[ACOL.登録日時] || '',
     })).filter(a => a.id);
-    res.render('admin/settings', { admins, msg: req.query.msg || '', error: null, isMaster: req.session.isMaster, editAdmin: null });
+    const masterInSheet = admins.find(a => a.id === masterId);
+    if (masterInSheet) {
+      masterInfo = masterInSheet;
+      admins = admins.filter(a => a.id !== masterId);
+    }
+    res.render('admin/settings', { admins, masterInfo, masterAdminId: masterId, msg: req.query.msg || '', error: null, isMaster: req.session.isMaster, editAdmin: null });
   } catch (e) { res.status(500).send('エラー: ' + e.message); }
 });
 
@@ -489,39 +500,58 @@ app.post('/admin/settings/add', requireAuth, async (req, res) => {
 
 app.get('/admin/settings/edit/:adminId', requireAuth, async (req, res) => {
   const targetId = req.params.adminId;
+  const masterId = process.env.ADMIN_ID || 'admin';
   try {
     const found = await findAdminAccount(targetId);
-    if (!found) return res.redirect('/admin/settings?msg=' + encodeURIComponent('アカウントが見つかりません'));
-    const row = found.row || [];
+    let editAdmin;
+    if (found) {
+      const row = found.row || [];
+      editAdmin = { id: row[ACOL.ID] || '', name: row[ACOL.名前] || '', email: row[ACOL.メールアドレス] || '' };
+    } else if (targetId === masterId) {
+      editAdmin = { id: masterId, name: '管理者', email: process.env.NOTIFY_EMAIL_TO || '' };
+    } else {
+      return res.redirect('/admin/settings?msg=' + encodeURIComponent('アカウントが見つかりません'));
+    }
     res.render('admin/settings', {
-      admins: [],
-      msg: '',
-      error: null,
+      admins: [], masterInfo: null, masterAdminId: masterId,
+      msg: req.query.msg || '', error: null,
       isMaster: req.session.isMaster,
-      editAdmin: { id: row[ACOL.ID] || '', name: row[ACOL.名前] || '', email: row[ACOL.メールアドレス] || '' },
+      editAdmin,
     });
   } catch (e) { res.status(500).send('エラー: ' + e.message); }
 });
 
 app.post('/admin/settings/edit/:adminId', requireAuth, async (req, res) => {
   const targetId = req.params.adminId;
+  const masterId = process.env.ADMIN_ID || 'admin';
   const { password, name, email } = req.body;
   if (!name) return res.redirect(`/admin/settings/edit/${targetId}?msg=` + encodeURIComponent('名前は必須です'));
   try {
     const found = await findAdminAccount(targetId);
-    if (!found) return res.redirect('/admin/settings?msg=' + encodeURIComponent('アカウントが見つかりません'));
-    const row = [...(found.row || [])];
-    while (row.length < 5) row.push('');
-    // パスワードが空の場合は既存を維持
-    row[ACOL.パスワード] = password || row[ACOL.パスワード];
-    row[ACOL.名前] = name;
-    row[ACOL.メールアドレス] = email || '';
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: SHEET_ID,
-      range: `${ADMIN_SHEET}!A${found.rowIndex + 1}:E${found.rowIndex + 1}`,
-      valueInputOption: 'USER_ENTERED',
-      requestBody: { values: [row] },
-    });
+    if (found) {
+      const row = [...(found.row || [])];
+      while (row.length < 5) row.push('');
+      row[ACOL.パスワード] = password || row[ACOL.パスワード];
+      row[ACOL.名前] = name;
+      row[ACOL.メールアドレス] = email || '';
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SHEET_ID,
+        range: `${ADMIN_SHEET}!A${found.rowIndex + 1}:E${found.rowIndex + 1}`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: [row] },
+      });
+    } else if (targetId === masterId) {
+      // マスター管理者がシート未登録の場合は新規追加
+      if (!password) return res.redirect(`/admin/settings/edit/${targetId}?msg=` + encodeURIComponent('初回登録時はパスワードの入力が必要です'));
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: SHEET_ID,
+        range: `${ADMIN_SHEET}!A:E`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: [[nowJST(), targetId, password, name, email || '']] },
+      });
+    } else {
+      return res.redirect('/admin/settings?msg=' + encodeURIComponent('アカウントが見つかりません'));
+    }
     res.redirect('/admin/settings?msg=' + encodeURIComponent(`${name}（${targetId}）を更新しました`));
   } catch (e) { res.status(500).send('エラー: ' + e.message); }
 });
