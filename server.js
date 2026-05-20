@@ -354,49 +354,26 @@ async function handleMessage(event) {
 
   const now = nowJST();
 
-  // 重複自動返信の制御（直近10分以内に自動返信済みなら再送しない）
-  const lastAutoReply = row[COL.最終想定外自動返信日時];
-  let shouldReply = true;
-  if (lastAutoReply) {
-    try {
-      // "yyyy/M/d H:mm:ss" (JST) → UTC Dateに変換（Render=UTCサーバーのため手動補正）
-      const m = lastAutoReply.match(/(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
-      if (m) {
-        const lastTime = new Date(Date.UTC(+m[1], +m[2]-1, +m[3], +m[4]-9, +m[5], +(m[6]||0)));
-        const diffMs = Date.now() - lastTime.getTime();
-        if (diffMs >= 0 && diffMs < 10 * 60 * 1000) {
-          shouldReply = false;
-          console.log(`[UNEXPECTED] 10分以内に自動返信済みのため再送しない: ${userId}`);
-        }
-      }
-    } catch (e) { /* パース失敗時は送信する */ }
-  }
-
   // ★ 最優先：LINE返信を先に送る（replyTokenは時間制限があるため）
-  if (shouldReply) {
-    try {
-      await client.replyMessage(event.replyToken, {
-        type: 'text',
-        text: '担当者より折り返しご連絡いたします。\n恐れ入りますが、少々お待ちください。',
-      });
-      console.log(`[UNEXPECTED] 自動返信送信完了: ${userId}`);
-    } catch (e) {
-      console.error('[ERROR] 想定外メッセージ自動返信失敗:', e.message);
-    }
+  try {
+    await client.replyMessage(event.replyToken, {
+      type: 'text',
+      text: '担当者より折り返しご連絡いたします。\n恐れ入りますが、少々お待ちください。',
+    });
+    console.log(`[UNEXPECTED] 自動返信送信完了: ${userId}`);
+  } catch (e) {
+    console.error('[ERROR] 想定外メッセージ自動返信失敗:', e.message);
   }
 
   // ★ シート更新はLINE返信の後にまとめて実行（レスポンス速度に影響しない）
   try {
-    const updateData = {
+    await upsertCandidate(userId, {
       [COL.要返信]: '要返信',
       [COL.最新問い合わせ内容]: text,
       [COL.最新問い合わせ日時]: now,
       [COL.最終LINE受信日時]: now,
-    };
-    if (shouldReply) {
-      updateData[COL.最終想定外自動返信日時] = now;
-    }
-    await upsertCandidate(userId, updateData);
+      [COL.最終想定外自動返信日時]: now,
+    });
   } catch (e) {
     console.error('[ERROR] 想定外メッセージ シート更新失敗:', e.message);
   }
