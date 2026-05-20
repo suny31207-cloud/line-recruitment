@@ -124,3 +124,28 @@ tr:hover td { background: #fafbfc; }
 .success-box h3 { color: #0a3622; font-size: 1.2rem; margin-bottom: 0.75rem; }
 .success-box p { color: #555; font-size: 0.9rem; }
 .success-note { margin-top: 1rem; background: #d1e7dd; padding: 0.75rem; border-radius: 6px; font-size: 0.88rem; color: #0a3622; }
+
+/* ===== Needs Reply ===== */
+.badge-needs-reply { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 10px; font-size: 0.72rem; font-weight: 700; background: #dc3545; color: white; animation: pulse-badge 2s ease-in-out infinite; }
+@keyframes pulse-badge { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+.badge-replied { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 10px; font-size: 0.72rem; font-weight: 600; background: #e9ecef; color: #6c757d; }
+.row-needs-reply td { background: #fff5f5 !important; }
+.row-needs-reply:hover td { background: #ffe8e8 !important; }
+.inquiry-preview { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.78rem; color: #555; }
+
+/* ===== Filter Bar ===== */
+.filter-bar { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; padding: 0.6rem 1rem; background: white; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+.filter-bar label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; font-weight: 500; color: #555; cursor: pointer; }
+.filter-bar input[type="checkbox"] { accent-color: #dc3545; width: 16px; height: 16px; cursor: pointer; }
+
+/* ===== Action Buttons (Detail) ===== */
+.btn-line-open { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1.2rem; background: #06c755; color: white; border: none; border-radius: 5px; font-size: 0.85rem; font-weight: 600; cursor: pointer; text-decoration: none; transition: background 0.15s; }
+.btn-line-open:hover { background: #05a847; }
+.btn-mark-replied { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.5rem 1.2rem; background: #6c757d; color: white; border: none; border-radius: 5px; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: background 0.15s; }
+.btn-mark-replied:hover { background: #565e64; }
+.action-buttons { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+
+/* ===== Needs Reply Card ===== */
+.needs-reply-card { border-left: 4px solid #dc3545; background: #fff5f5; }
+.needs-reply-card h3 { color: #dc3545; border-left-color: #dc3545; }
+.inquiry-content { background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 6px; padding: 0.75rem 1rem; font-size: 0.88rem; color: #333; white-space: pre-wrap; word-break: break-word; margin-top: 0.5rem; }

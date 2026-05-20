@@ -21,17 +21,32 @@
     <h2>応募者一覧 <span class="count-badge"><%= candidates.length %>名</span></h2>
   </div>
 
+  <!-- フィルターバー -->
+  <div class="filter-bar">
+    <label>
+      <input type="checkbox" id="filterNeedsReply" onchange="toggleFilter()">
+      要返信のみ表示
+    </label>
+    <% const needsReplyCount = candidates.filter(c => c.needsReply === '要返信').length; %>
+    <% if (needsReplyCount > 0) { %>
+    <span class="badge-needs-reply"><%= needsReplyCount %>件 要返信</span>
+    <% } %>
+  </div>
+
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
           <th>応募者名</th>
+          <th>要返信</th>
+          <th>最新問い合わせ</th>
           <th>希望内容</th>
           <th>ステータス</th>
           <th>アンケート</th>
           <th>見学予約日</th>
           <th>面接予定日</th>
           <th>回答結果</th>
+          <th>最終受信日時</th>
           <th>登録日時</th>
           <th></th>
         </tr>
@@ -39,15 +54,28 @@
       <tbody>
         <% if (candidates.length === 0) { %>
         <tr>
-          <td colspan="9" class="empty-row">応募者がいません</td>
+          <td colspan="12" class="empty-row">応募者がいません</td>
         </tr>
         <% } %>
         <% candidates.forEach(c => { %>
-        <tr>
+        <tr class="<%= c.needsReply === '要返信' ? 'row-needs-reply' : '' %>" data-needs-reply="<%= c.needsReply === '要返信' ? '1' : '0' %>">
           <td>
             <strong><%= c.name || '(名前未登録)' %></strong>
             <% if (c.changeRequested) { %><span class="change-indicator">🔔変更希望</span><% } %>
             <div class="sub-text"><%= c.lineUserId %></div>
+          </td>
+          <td>
+            <% if (c.needsReply === '要返信') { %>
+              <span class="badge-needs-reply">要返信</span>
+            <% } else if (c.needsReply === '対応済み') { %>
+              <span class="badge-replied">対応済み</span>
+            <% } else { %>-<% } %>
+          </td>
+          <td>
+            <% if (c.latestInquiry) { %>
+              <div class="inquiry-preview" title="<%= c.latestInquiry %>"><%= c.latestInquiry %></div>
+              <div class="sub-text"><%= c.latestInquiryDate %></div>
+            <% } else { %>-<% } %>
           </td>
           <td><%= c.preference || '-' %></td>
           <td>
@@ -77,6 +105,7 @@
               </span>
             <% } else { %>-<% } %>
           </td>
+          <td class="small-text"><%= c.lastReceived || '-' %></td>
           <td class="small-text"><%= c.registeredAt || '-' %></td>
           <td>
             <a href="/admin/candidates/<%= c.lineUserId %>" class="btn btn-sm">詳細</a>
@@ -87,5 +116,18 @@
     </table>
   </div>
 </main>
+
+<script>
+function toggleFilter() {
+  const checked = document.getElementById('filterNeedsReply').checked;
+  document.querySelectorAll('tbody tr[data-needs-reply]').forEach(row => {
+    if (checked && row.dataset.needsReply !== '1') {
+      row.style.display = 'none';
+    } else {
+      row.style.display = '';
+    }
+  });
+}
+</script>
 </body>
 </html>

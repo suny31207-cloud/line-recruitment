@@ -50,19 +50,21 @@ const sheets = google.sheets({ version: 'v4', auth: googleAuth });
 const SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const SHEET_NAME = '採用管理';
 
-// ===== 列定義（A〜T = 0〜19）=====
+// ===== 列定義（A〜Y = 0〜24）=====
 const COL = {
   登録日時: 0, LINEユーザーID: 1, 氏名: 2, 性別: 3, 年齢: 4,
   携帯番号: 5, 最寄駅: 6, 希望店舗: 7, 希望雇用形態: 8, 勤務開始希望日: 9,
   美容師経験: 10, サイドシャンプーありなし: 11, 希望内容: 12, 現在ステータス: 13,
   見学予約日: 14, 面接予定日: 15, 回答日時: 16, 回答結果: 17, 最終LINE送信日時: 18, 備考: 19,
+  要返信: 20, 最新問い合わせ内容: 21, 最新問い合わせ日時: 22, 最終LINE受信日時: 23, 最終想定外自動返信日時: 24,
 };
-const COL_COUNT = 20;
+const COL_COUNT = 25;
 const HEADERS = [
   '登録日時', 'LINEユーザーID', '氏名', '性別', '年齢', '携帯番号',
   '最寄駅', '希望店舗', '希望雇用形態', '勤務開始希望日', '美容師経験',
   'サイドシャンプーありなし', '希望内容', '現在ステータス', '見学予約日',
   '面接予定日', '回答日時', '回答結果', '最終LINE送信日時', '備考',
+  '要返信', '最新問い合わせ内容', '最新問い合わせ日時', '最終LINE受信日時', '最終想定外メッセージ自動返信日時',
 ];
 const STATUSES = ['未対応', '見学対応済み', '面接対応済み', '対応完了'];
 const STORES = ['三軒茶屋店','経堂店','桜新町店','溝口店','阿佐ヶ谷店','都立大学店','学芸大学店','高円寺店','たまプラーザ店','町田店','表参道店'];
@@ -85,7 +87,7 @@ function nowJST() {
 async function getSheetData() {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: SHEET_ID,
-    range: `${SHEET_NAME}!A:T`,
+    range: `${SHEET_NAME}!A:Y`,
   });
   return res.data.values || [];
 }
@@ -109,7 +111,7 @@ function padRow(row) {
 async function appendRow(values) {
   await sheets.spreadsheets.values.append({
     spreadsheetId: SHEET_ID,
-    range: `${SHEET_NAME}!A:T`,
+    range: `${SHEET_NAME}!A:Y`,
     valueInputOption: 'USER_ENTERED',
     requestBody: { values: [padRow(values)] },
   });
@@ -118,7 +120,7 @@ async function appendRow(values) {
 async function updateRow(rowIndex, values) {
   await sheets.spreadsheets.values.update({
     spreadsheetId: SHEET_ID,
-    range: `${SHEET_NAME}!A${rowIndex + 1}:T${rowIndex + 1}`,
+    range: `${SHEET_NAME}!A${rowIndex + 1}:Y${rowIndex + 1}`,
     valueInputOption: 'USER_ENTERED',
     requestBody: { values: [padRow(values)] },
   });
@@ -275,12 +277,13 @@ async function handleFollow(event) {
     displayName = p.displayName;
   } catch (e) { console.error('[WARN] profile取得失敗:', e.message); }
 
-  await upsertCandidate(userId, { [COL.氏名]: displayName });
-  // フォロー時: 挨拶 + 希望選択ボタン（アンケートは選択後に送る）
+  // ★ 先にLINE返信を送る
   await client.replyMessage(event.replyToken, [
     buildGreeting(),
     buildChoiceButtons(),
   ]);
+  // ★ その後にシート更新
+  await upsertCandidate(userId, { [COL.氏名]: displayName });
   console.log(`[FOLLOW] ${displayName} (${userId})`);
 }
 
@@ -290,13 +293,16 @@ async function handleMessage(event) {
 
   // 見学/面接選択 → 候補日時3つを依頼（備考に状態マーカーをセット）
   if (text === '見学希望' || text === '面接希望') {
-    await upsertCandidate(userId, {
-      [COL.希望内容]: text,
-      [COL.備考]: '__AWAITING_DATES',
-    });
+    // ★ 先にLINE返信を送る
     await client.replyMessage(event.replyToken, {
       type: 'text',
       text: `「${text}」を承りました！\n\nご都合の良い候補日時を3つ、このチャットに返信してください。\n\n＜例＞\n第1希望：6/5（木）14:00〜\n第2希望：6/7（土）11:00〜\n第3希望：6/8（日）15:00〜`,
+    });
+    // ★ その後にシート更新
+    await upsertCandidate(userId, {
+      [COL.希望内容]: text,
+      [COL.備考]: '__AWAITING_DATES',
+      [COL.最終LINE受信日時]: nowJST(),
     });
     return;
   }
@@ -307,13 +313,16 @@ async function handleMessage(event) {
   if (existing) {
     const row = padRow(existing.rowData);
     if ((row[COL.備考] || '').startsWith('__AWAITING_DATES')) {
-      await upsertCandidate(userId, {
-        [COL.備考]: `【候補日時】\n${text}`,
-      });
+      // ★ 先にLINE返信を送る
       await client.replyMessage(event.replyToken, [
         { type: 'text', text: '候補日時を承りました！\n続けてアンケートへのご記入をお願いします。' },
         buildSurveyLink(userId),
       ]);
+      // ★ その後にシート更新
+      await upsertCandidate(userId, {
+        [COL.備考]: `【候補日時】\n${text}`,
+        [COL.最終LINE受信日時]: nowJST(),
+      });
       return;
     }
   }
@@ -322,15 +331,74 @@ async function handleMessage(event) {
   if (!existing) {
     let displayName = '応募者';
     try { const p = await client.getProfile(userId); displayName = p.displayName; } catch (e) {}
-    await upsertCandidate(userId, { [COL.氏名]: displayName });
+    // ★ 先にLINE返信を送る
     await client.replyMessage(event.replyToken, [buildGreeting(), buildChoiceButtons()]);
+    // ★ その後にシート更新
+    await upsertCandidate(userId, { [COL.氏名]: displayName, [COL.最終LINE受信日時]: nowJST() });
     return;
   }
 
   // 登録済みで希望未選択の場合は再度ボタンを出す
   const row = padRow(existing.rowData);
   if (!row[COL.希望内容]) {
+    // ★ 先にLINE返信を送る
     await client.replyMessage(event.replyToken, buildChoiceButtons());
+    // ★ その後にシート更新
+    await upsertCandidate(userId, { [COL.最終LINE受信日時]: nowJST() });
+    return;
+  }
+
+  // ===== 想定外メッセージ処理 =====
+  // ここに到達 = 既存フロー（見学/面接希望、候補日時待ち、未登録、希望未選択）のいずれにも該当しない
+  console.log(`[UNEXPECTED] 想定外メッセージ受信: ${userId} → "${text}"`);
+
+  const now = nowJST();
+
+  // 重複自動返信の制御（直近10分以内に自動返信済みなら再送しない）
+  const lastAutoReply = row[COL.最終想定外自動返信日時];
+  let shouldReply = true;
+  if (lastAutoReply) {
+    try {
+      // "yyyy/M/d H:mm:ss" (JST) → UTC Dateに変換（Render=UTCサーバーのため手動補正）
+      const m = lastAutoReply.match(/(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+      if (m) {
+        const lastTime = new Date(Date.UTC(+m[1], +m[2]-1, +m[3], +m[4]-9, +m[5], +(m[6]||0)));
+        const diffMs = Date.now() - lastTime.getTime();
+        if (diffMs >= 0 && diffMs < 10 * 60 * 1000) {
+          shouldReply = false;
+          console.log(`[UNEXPECTED] 10分以内に自動返信済みのため再送しない: ${userId}`);
+        }
+      }
+    } catch (e) { /* パース失敗時は送信する */ }
+  }
+
+  // ★ 最優先：LINE返信を先に送る（replyTokenは時間制限があるため）
+  if (shouldReply) {
+    try {
+      await client.replyMessage(event.replyToken, {
+        type: 'text',
+        text: '担当者より折り返しご連絡いたします。\n恐れ入りますが、少々お待ちください。',
+      });
+      console.log(`[UNEXPECTED] 自動返信送信完了: ${userId}`);
+    } catch (e) {
+      console.error('[ERROR] 想定外メッセージ自動返信失敗:', e.message);
+    }
+  }
+
+  // ★ シート更新はLINE返信の後にまとめて実行（レスポンス速度に影響しない）
+  try {
+    const updateData = {
+      [COL.要返信]: '要返信',
+      [COL.最新問い合わせ内容]: text,
+      [COL.最新問い合わせ日時]: now,
+      [COL.最終LINE受信日時]: now,
+    };
+    if (shouldReply) {
+      updateData[COL.最終想定外自動返信日時] = now;
+    }
+    await upsertCandidate(userId, updateData);
+  } catch (e) {
+    console.error('[ERROR] 想定外メッセージ シート更新失敗:', e.message);
   }
 }
 
@@ -593,6 +661,10 @@ app.get('/admin', requireAuth, async (req, res) => {
           store:           r[COL.希望店舗],
           surveyDone:      !!(r[COL.携帯番号] || r[COL.希望店舗]),
           changeRequested: note.includes('日程変更希望'),
+          needsReply:      r[COL.要返信] || '',
+          latestInquiry:   r[COL.最新問い合わせ内容] || '',
+          latestInquiryDate: r[COL.最新問い合わせ日時] || '',
+          lastReceived:    r[COL.最終LINE受信日時] || '',
         };
       })
       .filter(c => c.lineUserId);
@@ -618,8 +690,13 @@ app.get('/admin/candidates/:uid', requireAuth, async (req, res) => {
       answerDate: r[COL.回答日時], answer: r[COL.回答結果],
       lastSent: r[COL.最終LINE送信日時], note: r[COL.備考],
       registeredAt: r[COL.登録日時],
+      needsReply: r[COL.要返信] || '',
+      latestInquiry: r[COL.最新問い合わせ内容] || '',
+      latestInquiryDate: r[COL.最新問い合わせ日時] || '',
+      lastReceived: r[COL.最終LINE受信日時] || '',
     };
-    res.render('admin/detail', { c, statuses: STATUSES, stores: STORES, msg: req.query.msg || '' });
+    const lineOfficialChatUrl = process.env.LINE_OFFICIAL_CHAT_URL || '';
+    res.render('admin/detail', { c, statuses: STATUSES, stores: STORES, msg: req.query.msg || '', lineOfficialChatUrl });
   } catch (e) { res.status(500).send('エラー: ' + e.message); }
 });
 
@@ -724,8 +801,28 @@ app.post('/admin/candidates/:uid/send', requireAuth, async (req, res) => {
     else return res.status(400).send('送信タイプが不正です');
 
     await client.pushMessage(userId, msgs);
-    await upsertCandidate(userId, { [COL.最終LINE送信日時]: nowJST() });
+    // 最終LINE送信日時を更新し、要返信ステータスを「対応済み」に自動更新
+    const updateData = { [COL.最終LINE送信日時]: nowJST() };
+    const currentRow = padRow(found.rowData);
+    if (currentRow[COL.要返信] === '要返信') {
+      updateData[COL.要返信] = '対応済み';
+    }
+    await upsertCandidate(userId, updateData);
     res.redirect(`/admin/candidates/${userId}?msg=${encodeURIComponent('LINEを送信しました')}`);
+  } catch (e) { res.status(500).send('エラー: ' + e.message); }
+});
+
+// ===== 管理画面：要返信を対応済みにする =====
+app.post('/admin/candidates/:uid/mark-replied', requireAuth, async (req, res) => {
+  const userId = req.params.uid;
+  try {
+    const found = await findRowByUserId(userId);
+    if (!found) return res.status(404).send('応募者が見つかりません');
+    await upsertCandidate(userId, {
+      [COL.要返信]: '対応済み',
+    });
+    console.log(`[MARK-REPLIED] 要返信→対応済み: ${userId}`);
+    res.redirect(`/admin/candidates/${userId}?msg=${encodeURIComponent('要返信を対応済みにしました')}`);
   } catch (e) { res.status(500).send('エラー: ' + e.message); }
 });
 
@@ -763,31 +860,37 @@ app.post('/survey/:uid', async (req, res) => {
       [COL.美容師経験]: experience, [COL.サイドシャンプーありなし]: sideshampoo || '',
     });
 
-    // アンケート完了 → メール通知
-    const notifyRow = (await findRowByUserId(userId))?.rowData || [];
-    const nr = padRow(notifyRow);
-    const candidateDatesNote = (nr[COL.備考] || '').includes('【候補日時】')
-      ? '\n\n' + nr[COL.備考].replace('__AWAITING_DATES', '')
-      : '';
-    await sendNotification(
-      `【採用アンケート】新規回答：${name}`,
-      `${name}様よりアンケートの回答がありました。\n\n` +
-      `氏名：${name}\n希望内容：${nr[COL.希望内容] || '-'}\n希望店舗：${store}\n` +
-      `携帯番号：${phone}\n美容師経験：${experience}` +
-      `${candidateDatesNote}\n\n` +
-      `▼ 管理画面\n${APP_URL}/admin/candidates/${userId}`
-    );
-
-    // アンケート完了 → 確認メッセージ送信
-    try {
-      await client.pushMessage(userId, {
-        type: 'text',
-        text: 'アンケートのご記入ありがとうございます！\n内容を確認のうえ、担当者よりご連絡いたします。\nしばらくお待ちください😊',
-      });
-      await upsertCandidate(userId, { [COL.最終LINE送信日時]: nowJST() });
-    } catch (e) { console.warn('[WARN] アンケート後LINE送信失敗:', e.message); }
-
+    // ===== ここで即座に完了画面を返す =====
     res.render('survey', { uid: userId, liffId: LIFF_ID, stores: STORES, error: null, success: true, prefill: {} });
+
+    // ===== 以降はバックグラウンドで実行（レスポンスをブロックしない）=====
+    (async () => {
+      try {
+        // メール通知
+        const notifyRow = (await findRowByUserId(userId))?.rowData || [];
+        const nr = padRow(notifyRow);
+        const candidateDatesNote = (nr[COL.備考] || '').includes('【候補日時】')
+          ? '\n\n' + nr[COL.備考].replace('__AWAITING_DATES', '')
+          : '';
+        await sendNotification(
+          `【採用アンケート】新規回答：${name}`,
+          `${name}様よりアンケートの回答がありました。\n\n` +
+          `氏名：${name}\n希望内容：${nr[COL.希望内容] || '-'}\n希望店舗：${store}\n` +
+          `携帯番号：${phone}\n美容師経験：${experience}` +
+          `${candidateDatesNote}\n\n` +
+          `▼ 管理画面\n${APP_URL}/admin/candidates/${userId}`
+        );
+      } catch (e) { console.error('[ERROR] アンケート後メール通知失敗:', e.message); }
+
+      try {
+        // LINE確認メッセージ送信
+        await client.pushMessage(userId, {
+          type: 'text',
+          text: 'アンケートのご記入ありがとうございます！\n内容を確認のうえ、担当者よりご連絡いたします。\nしばらくお待ちください😊',
+        });
+        await upsertCandidate(userId, { [COL.最終LINE送信日時]: nowJST() });
+      } catch (e) { console.warn('[WARN] アンケート後LINE送信失敗:', e.message); }
+    })();
   } catch (e) {
     console.error('[ERROR] アンケート保存失敗:', e.message);
     renderError('エラーが発生しました。もう一度お試しください。');

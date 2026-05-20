@@ -21,10 +21,61 @@
   <% } %>
 
   <div class="detail-title">
-    <h2><%= c.name || '(名前未登録)' %></h2>
+    <h2>
+      <%= c.name || '(名前未登録)' %>
+      <% if (c.needsReply === '要返信') { %>
+        <span class="badge-needs-reply" style="margin-left:0.5rem;font-size:0.8rem">要返信</span>
+      <% } else if (c.needsReply === '対応済み') { %>
+        <span class="badge-replied" style="margin-left:0.5rem;font-size:0.8rem">対応済み</span>
+      <% } %>
+    </h2>
     <span class="status-badge status-<%= c.status.replace(/\s/g,'') %>"><%= c.status %></span>
     <div class="sub-text">LINE ID: <%= c.lineUserId %></div>
   </div>
+
+  <!-- アクションボタン -->
+  <div class="action-buttons">
+    <% if (lineOfficialChatUrl) { %>
+    <a href="<%= lineOfficialChatUrl %>" target="_blank" rel="noopener noreferrer" class="btn-line-open">
+      💬 公式LINEを開く
+    </a>
+    <% } %>
+    <% if (c.needsReply === '要返信') { %>
+    <form action="/admin/candidates/<%= c.lineUserId %>/mark-replied" method="POST" style="display:inline">
+      <button type="submit" class="btn-mark-replied"
+        onclick="return confirm('要返信を対応済みにしますか？')">
+        ✅ 要返信を対応済みにする
+      </button>
+    </form>
+    <% } %>
+  </div>
+
+  <!-- 要返信・問い合わせ情報（要返信または対応済みの場合のみ表示） -->
+  <% if (c.needsReply) { %>
+  <div class="card <%= c.needsReply === '要返信' ? 'needs-reply-card' : '' %>">
+    <h3>問い合わせ情報</h3>
+    <div class="grid-3">
+      <div class="form-group">
+        <label>要返信ステータス</label>
+        <input type="text" value="<%= c.needsReply %>" readonly class="readonly-field">
+      </div>
+      <div class="form-group">
+        <label>最新問い合わせ日時</label>
+        <input type="text" value="<%= c.latestInquiryDate || '-' %>" readonly class="readonly-field">
+      </div>
+      <div class="form-group">
+        <label>最終LINE受信日時</label>
+        <input type="text" value="<%= c.lastReceived || '-' %>" readonly class="readonly-field">
+      </div>
+    </div>
+    <% if (c.latestInquiry) { %>
+    <div class="form-group">
+      <label>最新問い合わせ内容</label>
+      <div class="inquiry-content"><%= c.latestInquiry %></div>
+    </div>
+    <% } %>
+  </div>
+  <% } %>
 
   <!-- 応募者情報・対応管理フォーム -->
   <form action="/admin/candidates/<%= c.lineUserId %>" method="POST">
@@ -144,6 +195,10 @@
           <input type="text" value="<%= c.lastSent || '-' %>" readonly class="readonly-field">
         </div>
         <div class="form-group">
+          <label>最終LINE受信日時</label>
+          <input type="text" value="<%= c.lastReceived || '-' %>" readonly class="readonly-field">
+        </div>
+        <div class="form-group">
           <label>登録日時</label>
           <input type="text" value="<%= c.registeredAt || '-' %>" readonly class="readonly-field">
         </div>
@@ -190,6 +245,9 @@
   <!-- LINE送信 -->
   <div class="card" style="margin-top:1.5rem">
     <h3>LINE送信</h3>
+    <% if (c.needsReply === '要返信') { %>
+    <p class="form-note" style="color:#dc3545;font-weight:600;margin-bottom:0.75rem">⚠ この応募者は要返信です。メッセージを送信すると自動で「対応済み」になります。</p>
+    <% } %>
     <form action="/admin/candidates/<%= c.lineUserId %>/send" method="POST">
       <div class="grid-2">
         <div class="form-group">
