@@ -287,18 +287,23 @@ async function handleFollow(event) {
   console.log(`[FOLLOW] ${displayName} (${userId})`);
 }
 
+// 候補日時らしい文章かチェック（数字＋日付キーワードが含まれる）
+function looksLikeDates(text) {
+  const hasNumber = /\d/.test(text);
+  const hasDateMarker = /[月日\/：:]|第\d|午前|午後|\d+時/.test(text);
+  return hasNumber && hasDateMarker;
+}
+
 async function handleMessage(event) {
   const userId = event.source.userId;
   const text = event.message.text?.trim();
 
-  // 見学/面接選択 → 候補日時3つを依頼（備考に状態マーカーをセット）
+  // 見学/面接ボタン選択
   if (text === '見学希望' || text === '面接希望') {
-    // ★ 先にLINE返信を送る
     await client.replyMessage(event.replyToken, {
       type: 'text',
       text: `「${text}」を承りました！\n\nご都合の良い候補日時を3つ、このチャットに返信してください。\n\n＜例＞\n第1希望：6/5（木）14:00〜\n第2希望：6/7（土）11:00〜\n第3希望：6/8（日）15:00〜`,
     });
-    // ★ その後にシート更新
     await upsertCandidate(userId, {
       [COL.希望内容]: text,
       [COL.備考]: '__AWAITING_DATES',
@@ -309,52 +314,39 @@ async function handleMessage(event) {
 
   const existing = await findRowByUserId(userId);
 
-  // 候補日時待ち → 日時を備考に記録してアンケート送信
+  // 候補日時待ち → 日付形式の内容のみ受け付ける
   if (existing) {
     const row = padRow(existing.rowData);
     if ((row[COL.備考] || '').startsWith('__AWAITING_DATES')) {
-      // ★ 先にLINE返信を送る
-      await client.replyMessage(event.replyToken, [
-        { type: 'text', text: '候補日時を承りました！\n続けてアンケートへのご記入をお願いします。' },
-        buildSurveyLink(userId),
-      ]);
-      // ★ その後にシート更新
-      await upsertCandidate(userId, {
-        [COL.備考]: `【候補日時】\n${text}`,
-        [COL.最終LINE受信日時]: nowJST(),
-      });
-      return;
+      if (looksLikeDates(text)) {
+        await client.replyMessage(event.replyToken, [
+          { type: 'text', text: '候補日時を承りました！\n続けてアンケートへのご記入をお願いします。' },
+          buildSurveyLink(userId),
+        ]);
+        await upsertCandidate(userId, {
+          [COL.備考]: `【候補日時】\n${text}`,
+          [COL.最終LINE受信日時]: nowJST(),
+        });
+        return;
+      }
+      // 日付形式でない → 想定外として処理
+      console.log(`[UNEXPECTED] 候補日時待ち中に日付以外のメッセージ: ${userId} → "${text}"`);
     }
   }
 
-  // 未登録ユーザーは登録して挨拶 + 希望選択ボタン
-  if (!existing) {
-    let displayName = '応募者';
-    try { const p = await client.getProfile(userId); displayName = p.displayName; } catch (e) {}
-    // ★ 先にLINE返信を送る
-    await client.replyMessage(event.replyToken, [buildGreeting(), buildChoiceButtons()]);
-    // ★ その後にシート更新
-    await upsertCandidate(userId, { [COL.氏名]: displayName, [COL.最終LINE受信日時]: nowJST() });
-    return;
-  }
-
-  // 登録済みで希望未選択の場合は再度ボタンを出す
-  const row = padRow(existing.rowData);
-  if (!row[COL.希望内容]) {
-    // ★ 先にLINE返信を送る
-    await client.replyMessage(event.replyToken, buildChoiceButtons());
-    // ★ その後にシート更新
-    await upsertCandidate(userId, { [COL.最終LINE受信日時]: nowJST() });
-    return;
-  }
-
   // ===== 想定外メッセージ処理 =====
-  // ここに到達 = 既存フロー（見学/面接希望、候補日時待ち、未登録、希望未選択）のいずれにも該当しない
+  // (未登録・希望未選択・候補日時待ちで日付以外・その他すべてここに集約)
   console.log(`[UNEXPECTED] 想定外メッセージ受信: ${userId} → "${text}"`);
 
   const now = nowJST();
 
-  // ★ 最優先：LINE返信を先に送る（replyTokenは時間制限があるため）
+  // 未登録の場合はプロフィール名で登録（upsertで新規作成される）
+  let nameForNew = null;
+  if (!existing) {
+    try { const p = await client.getProfile(userId); nameForNew = p.displayName; } catch (e) {}
+  }
+
+  // ★ 先にLINE返信（replyTokenは時間制限あり）
   try {
     await client.replyMessage(event.replyToken, {
       type: 'text',
@@ -365,15 +357,17 @@ async function handleMessage(event) {
     console.error('[ERROR] 想定外メッセージ自動返信失敗:', e.message);
   }
 
-  // ★ シート更新はLINE返信の後にまとめて実行（レスポンス速度に影響しない）
+  // ★ シート更新
   try {
-    await upsertCandidate(userId, {
+    const updateData = {
       [COL.要返信]: '要返信',
       [COL.最新問い合わせ内容]: text,
       [COL.最新問い合わせ日時]: now,
       [COL.最終LINE受信日時]: now,
       [COL.最終想定外自動返信日時]: now,
-    });
+    };
+    if (nameForNew) updateData[COL.氏名] = nameForNew;
+    await upsertCandidate(userId, updateData);
   } catch (e) {
     console.error('[ERROR] 想定外メッセージ シート更新失敗:', e.message);
   }
