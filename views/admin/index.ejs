@@ -21,7 +21,7 @@
 <main>
   <div class="page-header">
     <%
-      const activeCount = candidates.filter(c => !c.is_blocked).length;
+      const activeCount = candidates.length;
       const needsReplyCount = candidates.filter(c => c.needs_reply === '要返信').length;
     %>
     <h2>応募者一覧 <span class="count-badge"><%= activeCount %>名</span></h2>
