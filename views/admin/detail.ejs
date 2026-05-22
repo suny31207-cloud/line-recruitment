@@ -156,6 +156,32 @@
           </div>
         </div>
 
+        <!-- 候補日時承認 -->
+        <% if (candidateDates && candidateDates.length > 0) { %>
+        <div class="card" style="border-left: 4px solid #2d6a4f;">
+          <h3>候補日時の承認</h3>
+          <p style="font-size:0.82rem;color:#666;margin-bottom:0.75rem">応募者が希望した日時を承認すると、自動でLINE通知が送信されます。</p>
+          <% candidateDates.forEach(d => { %>
+          <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.6rem;flex-wrap:wrap">
+            <span style="font-size:0.85rem;font-weight:600;min-width:60px"><%= d.label %></span>
+            <span style="font-size:0.9rem;flex:1"><%= d.value %></span>
+            <div style="display:flex;gap:0.4rem">
+              <form action="/admin/candidates/<%= c.line_user_id %>/confirm-date" method="POST" style="display:inline">
+                <input type="hidden" name="confirmed_date" value="<%= d.value %>">
+                <input type="hidden" name="date_type" value="visit">
+                <button type="submit" class="btn-approve" onclick="return confirm('<%= d.value %> で見学日程を確定しますか？')">見学確定</button>
+              </form>
+              <form action="/admin/candidates/<%= c.line_user_id %>/confirm-date" method="POST" style="display:inline">
+                <input type="hidden" name="confirmed_date" value="<%= d.value %>">
+                <input type="hidden" name="date_type" value="interview">
+                <button type="submit" class="btn-approve" style="background:#495057" onclick="return confirm('<%= d.value %> で面接日程を確定しますか？')">面接確定</button>
+              </form>
+            </div>
+          </div>
+          <% }) %>
+        </div>
+        <% } %>
+
         <!-- 対応管理 -->
         <div class="card">
           <h3>対応管理</h3>

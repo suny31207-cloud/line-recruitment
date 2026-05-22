@@ -152,8 +152,8 @@ tr:hover td { background: #fafbfc; }
 .badge-replied { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 10px; font-size: 0.72rem; font-weight: 600; background: #e9ecef; color: #6c757d; }
 .row-needs-reply td { background: #fff5f5 !important; }
 .row-needs-reply:hover td { background: #ffe8e8 !important; }
-.row-blocked td { opacity: 0.45; }
-.row-blocked:hover td { background: #f8f9fa !important; }
+.row-blocked td { background: #f4f4f4 !important; color: #aaa; }
+.row-blocked:hover td { background: #ebebeb !important; }
 .inquiry-preview { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.78rem; color: #555; }
 
 /* ===== Filter Bar ===== */

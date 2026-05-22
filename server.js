@@ -71,6 +71,13 @@ function nowJST() {
   return new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
 }
 
+function formatDatetimeLocal(val) {
+  if (!val) return '';
+  const m = val.match(/^(\d{4})-(\d{1,2})-(\d{1,2})T(\d{2}:\d{2})/);
+  if (m) return `${m[1]}/${parseInt(m[2])}/${parseInt(m[3])} ${m[4]}`;
+  return val;
+}
+
 function getAutoReply(key) {
   const r = db.prepare('SELECT * FROM auto_replies WHERE key=?').get(key);
   if (!r || !r.is_active) return null;
@@ -415,6 +422,18 @@ app.get('/admin/candidates/:uid', requireAuth, (req, res) => {
     ).get(req.params.uid);
     const templates = db.prepare('SELECT * FROM templates WHERE is_active=1 ORDER BY id').all();
     const lineOfficialChatUrl = process.env.LINE_OFFICIAL_CHAT_URL || '';
+
+    let candidateDates = [];
+    if (c && c.note && c.note.includes('【候補日時】')) {
+      const block = c.note.match(/【候補日時】([\s\S]*?)(\n\n|$)/);
+      if (block) {
+        block[1].trim().split('\n').forEach(line => {
+          const dm = line.match(/第(\d)希望[：:]\s*(.+)/);
+          if (dm) candidateDates.push({ label: `第${dm[1]}希望`, value: dm[2].trim() });
+        });
+      }
+    }
+
     res.render('admin/detail', {
       c,
       messages,
@@ -424,6 +443,7 @@ app.get('/admin/candidates/:uid', requireAuth, (req, res) => {
       stores: STORES,
       msg: req.query.msg || '',
       lineOfficialChatUrl,
+      candidateDates,
     });
   } catch (e) {
     console.error('[ERROR] 詳細取得失敗:', e.message);
@@ -547,6 +567,47 @@ app.post('/admin/candidates/:uid/mark-replied', requireAuth, (req, res) => {
     console.log(`[MARK-REPLIED] 要返信→対応済み: ${userId}`);
     res.redirect(`/admin/candidates/${userId}?msg=${encodeURIComponent('要返信を対応済みにしました')}`);
   } catch (e) {
+    res.status(500).send('エラー: ' + e.message);
+  }
+});
+
+// ===== 管理画面：候補日時承認 =====
+app.post('/admin/candidates/:uid/confirm-date', requireAuth, async (req, res) => {
+  const userId = req.params.uid;
+  const { confirmed_date, date_type } = req.body;
+  try {
+    const c = db.prepare('SELECT * FROM candidates WHERE line_user_id=?').get(userId);
+    if (!c) return res.status(404).send('応募者が見つかりません');
+
+    const updates = {};
+    if (date_type === 'visit') {
+      updates.visit_date = confirmed_date;
+      updates.status = '見学予約済み';
+    } else {
+      updates.interview_date = confirmed_date;
+      updates.status = '面接予約済み';
+    }
+
+    const newNote = (c.note || '').replace(
+      /【候補日時】[\s\S]*?(\n\n|$)/,
+      `【確認済み候補日時】\n${confirmed_date}\n\n`
+    );
+    updates.note = newNote.trimEnd();
+    upsertCandidate(userId, updates);
+
+    const label = date_type === 'visit' ? '見学' : '面接';
+    const name = c.name || c.display_name || '';
+    const confirmMsg = `${name}様\n\n${label}日程が確定しました。\n\n日時：${confirmed_date}\n\nご来店をお待ちしております😊`;
+
+    try {
+      await client.pushMessage(userId, { type: 'text', text: confirmMsg });
+      saveMessage(userId, 'out', confirmMsg, req.session.adminId || 'admin');
+      upsertCandidate(userId, { last_sent: nowJST() });
+    } catch (e) { console.error('[ERROR] 日程確認LINE送信失敗:', e.message); }
+
+    res.redirect(`/admin/candidates/${userId}?msg=${encodeURIComponent('日程を確定しLINEを送信しました')}`);
+  } catch (e) {
+    console.error('[ERROR] 日程確定失敗:', e.message);
     res.status(500).send('エラー: ' + e.message);
   }
 });
@@ -786,23 +847,29 @@ app.get('/survey/:uid', (req, res) => {
 
 app.post('/survey/:uid', async (req, res) => {
   const userId = req.params.uid;
-  const { name, gender, age, phone, station, store, employment, start_date, experience, side_shampoo } = req.body;
+  const { name, gender, age, phone, station, store, employment, start_date, experience, side_shampoo, preference, date1, date2, date3 } = req.body;
 
   const renderError = (msg) => res.render('survey', {
     uid: userId, liffId: LIFF_ID, stores: STORES, error: msg, success: false, prefill: req.body,
   });
 
-  if (!name || !gender || !age || !phone || !station || !store || !employment || !start_date || !experience || !side_shampoo) {
+  if (!name || !gender || !age || !phone || !station || !store || !employment || !start_date || !experience || !side_shampoo || !preference || !date1) {
     return renderError('全ての項目を入力してください');
   }
   if (!/^[0-9]{10,11}$/.test(phone.replace(/[-\s]/g, ''))) {
     return renderError('携帯番号は10〜11桁の数字で入力してください（ハイフン不要）');
   }
 
+  const dateParts = [`第1希望：${formatDatetimeLocal(date1)}`];
+  if (date2) dateParts.push(`第2希望：${formatDatetimeLocal(date2)}`);
+  if (date3) dateParts.push(`第3希望：${formatDatetimeLocal(date3)}`);
+  const candidateNote = `【候補日時】\n${dateParts.join('\n')}`;
+
   try {
     upsertCandidate(userId, {
       name, gender, age, phone, station, store, employment,
-      start_date, experience, side_shampoo,
+      start_date, experience, side_shampoo, preference,
+      note: candidateNote,
       status: 'アンケート回答済み',
     });
 
