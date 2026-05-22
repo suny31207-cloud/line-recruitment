@@ -220,7 +220,7 @@ async function handleFollow(event) {
   }
   msgs.push({
     type: 'text',
-    text: `ありがとうございます！\n続けて下記のアンケートにご記入ください。\n\n▼ アンケートはこちら\n${surveyUrl}`,
+    text: `▼ アンケートはこちら\n${surveyUrl}`,
   });
 
   try {
