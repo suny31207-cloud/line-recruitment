@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>テンプレート管理 - COLOR KITCHEN</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<header>
+  <div class="header-inner">
+    <h1>COLOR KITCHEN 採用管理</h1>
+    <nav class="header-nav">
+      <a href="/admin" class="nav-link">応募者一覧</a>
+      <a href="/admin/auto-replies" class="nav-link">自動返信</a>
+      <a href="/admin/settings" class="nav-link">設定</a>
+      <a href="/admin/logout" class="logout-link">ログアウト</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <div class="page-header">
+    <h2>テンプレート管理</h2>
+  </div>
+
+  <% if (msg) { %>
+  <div class="alert alert-<%= msg.includes('失敗') || msg.includes('必須') ? 'error' : 'success' %>"><%= msg %></div>
+  <% } %>
+
+  <!-- テンプレート一覧 -->
+  <div class="card">
+    <h3>テンプレート一覧 <span class="count-badge"><%= templates.length %>件</span></h3>
+    <% if (templates.length === 0) { %>
+    <p class="text-muted">テンプレートはありません</p>
+    <% } else { %>
+    <div class="template-list">
+      <% templates.forEach(t => { %>
+      <div class="template-item <%= t.is_active ? '' : 'template-inactive' %>">
+        <div class="template-header">
+          <div>
+            <span class="template-name"><%= t.name %></span>
+            <% if (t.purpose) { %><span class="purpose-badge"><%= t.purpose %></span><% } %>
+            <% if (!t.is_active) { %><span class="badge badge-inactive">無効</span><% } %>
+          </div>
+          <div class="template-actions">
+            <a href="/admin/templates/<%= t.id %>/edit" class="btn btn-sm">編集</a>
+            <form action="/admin/templates/<%= t.id %>/delete" method="POST" style="display:inline"
+              onsubmit="return confirm('「<%= t.name %>」を削除しますか？')">
+              <button type="submit" class="btn-delete">削除</button>
+            </form>
+          </div>
+        </div>
+        <div class="template-content"><%= t.content %></div>
+        <div class="sub-text" style="margin-top:0.5rem">更新: <%= t.updated_at || '-' %></div>
+      </div>
+      <% }) %>
+    </div>
+    <% } %>
+  </div>
+
+  <!-- 追加/編集フォーム -->
+  <div class="card">
+    <% if (typeof editTemplate !== 'undefined' && editTemplate) { %>
+    <h3>テンプレートを編集</h3>
+    <form action="/admin/templates/<%= editTemplate.id %>/edit" method="POST">
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="required">テンプレート名</label>
+          <input type="text" name="name" value="<%= editTemplate.name %>" required>
+        </div>
+        <div class="form-group">
+          <label>用途</label>
+          <input type="text" name="purpose" value="<%= editTemplate.purpose || '' %>" placeholder="例: 見学・面接・結果">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="required">内容</label>
+        <textarea name="content" rows="6" required><%= editTemplate.content %></textarea>
+      </div>
+      <div class="form-group">
+        <label>
+          <input type="checkbox" name="is_active" value="1" <%= editTemplate.is_active ? 'checked' : '' %>>
+          有効にする
+        </label>
+      </div>
+      <div style="display:flex;gap:0.75rem">
+        <button type="submit" class="btn-primary">更新する</button>
+        <a href="/admin/templates" class="btn-secondary" style="display:inline-flex;align-items:center;text-decoration:none">キャンセル</a>
+      </div>
+    </form>
+    <% } else { %>
+    <h3>テンプレートを追加</h3>
+    <form action="/admin/templates" method="POST">
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="required">テンプレート名</label>
+          <input type="text" name="name" placeholder="例: 見学案内" required>
+        </div>
+        <div class="form-group">
+          <label>用途</label>
+          <input type="text" name="purpose" placeholder="例: 見学">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="required">内容</label>
+        <textarea name="content" rows="6" placeholder="送信するメッセージの内容を入力してください" required></textarea>
+      </div>
+      <button type="submit" class="btn-primary">追加する</button>
+    </form>
+    <% } %>
+  </div>
+</main>
+</body>
+</html>

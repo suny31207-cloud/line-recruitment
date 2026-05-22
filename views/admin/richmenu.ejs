@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>リッチメニュー設定 - COLOR KITCHEN</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<header>
+  <div class="header-inner">
+    <h1>COLOR KITCHEN 採用管理</h1>
+    <nav class="header-nav">
+      <a href="/admin" class="nav-link">応募者一覧</a>
+      <a href="/admin/templates" class="nav-link">テンプレート</a>
+      <a href="/admin/settings" class="nav-link">設定</a>
+      <a href="/admin/logout" class="logout-link">ログアウト</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <div class="page-header">
+    <h2>リッチメニュー設定</h2>
+  </div>
+
+  <% if (msg) { %>
+  <div class="alert alert-<%= msg.includes('削除') || msg.includes('失敗') ? 'error' : 'success' %>"><%= msg %></div>
+  <% } %>
+
+  <div class="card">
+    <h3>説明</h3>
+    <p style="font-size:0.88rem;color:#555;line-height:1.8">
+      リッチメニューのボタン設定を管理します。<br>
+      ここで設定した内容はLINE Developers側でのリッチメニュー設定の参考として使用できます。<br>
+      LINE公式アカウントのリッチメニューは <a href="https://developers.line.biz/" target="_blank" rel="noopener">LINE Developers</a> または <a href="https://manager.line.biz/" target="_blank" rel="noopener">LINE Official Account Manager</a> で設定してください。
+    </p>
+  </div>
+
+  <!-- リッチメニュー一覧 -->
+  <div class="card">
+    <h3>現在のリッチメニュー設定 <span class="count-badge"><%= richMenuItems.length %>件</span></h3>
+    <% if (richMenuItems.length === 0) { %>
+    <p class="text-muted">設定はありません</p>
+    <% } else { %>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>表示順</th>
+            <th>ラベル</th>
+            <th>表示テキスト</th>
+            <th>URL</th>
+            <th>状態</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <% richMenuItems.forEach(item => { %>
+          <tr>
+            <td><%= item.sort_order %></td>
+            <td><strong><%= item.label || '-' %></strong></td>
+            <td class="small-text"><%= item.display_text || '-' %></td>
+            <td class="small-text" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+              <%= item.url || '-' %>
+            </td>
+            <td>
+              <span class="badge <%= item.is_active ? 'badge-done' : 'badge-inactive' %>">
+                <%= item.is_active ? '有効' : '無効' %>
+              </span>
+            </td>
+            <td>
+              <div style="display:flex;gap:0.4rem">
+                <button type="button" class="btn btn-sm" onclick="openEditModal(<%= item.id %>, '<%= encodeURIComponent(JSON.stringify(item)) %>')">編集</button>
+                <form action="/admin/richmenu/<%= item.id %>/delete" method="POST" style="display:inline"
+                  onsubmit="return confirm('「<%= item.label %>」を削除しますか？')">
+                  <button type="submit" class="btn-delete">削除</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+    <% } %>
+  </div>
+
+  <!-- 追加フォーム -->
+  <div class="card">
+    <h3>リッチメニュー項目を追加</h3>
+    <form action="/admin/richmenu" method="POST">
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="required">ラベル</label>
+          <input type="text" name="label" placeholder="例: アンケートに回答" required>
+        </div>
+        <div class="form-group">
+          <label>表示テキスト（タップ時）</label>
+          <input type="text" name="display_text" placeholder="例: アンケートを開く">
+        </div>
+        <div class="form-group">
+          <label>リンクURL</label>
+          <input type="url" name="url" placeholder="例: https://example.com/survey">
+        </div>
+        <div class="form-group">
+          <label>表示順</label>
+          <input type="number" name="sort_order" value="0" min="0">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>
+          <input type="checkbox" name="is_active" value="1" checked>
+          有効にする
+        </label>
+      </div>
+      <button type="submit" class="btn-primary">追加する</button>
+    </form>
+  </div>
+
+  <!-- 編集モーダル -->
+  <div id="editModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center">
+    <div style="background:white;border-radius:10px;padding:2rem;width:90%;max-width:500px;max-height:90vh;overflow-y:auto">
+      <h3 style="margin-bottom:1.5rem;color:#2d6a4f">リッチメニュー項目を編集</h3>
+      <form id="editForm" method="POST">
+        <div class="form-group">
+          <label>ラベル</label>
+          <input type="text" name="label" id="editLabel">
+        </div>
+        <div class="form-group">
+          <label>表示テキスト</label>
+          <input type="text" name="display_text" id="editDisplayText">
+        </div>
+        <div class="form-group">
+          <label>URL</label>
+          <input type="url" name="url" id="editUrl">
+        </div>
+        <div class="form-group">
+          <label>表示順</label>
+          <input type="number" name="sort_order" id="editSortOrder" min="0">
+        </div>
+        <div class="form-group">
+          <label>
+            <input type="checkbox" name="is_active" id="editIsActive" value="1">
+            有効にする
+          </label>
+        </div>
+        <div style="display:flex;gap:0.75rem;margin-top:1rem">
+          <button type="submit" class="btn-primary">保存する</button>
+          <button type="button" class="btn-secondary" onclick="closeEditModal()">キャンセル</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</main>
+
+<script>
+function openEditModal(id, dataEncoded) {
+  const data = JSON.parse(decodeURIComponent(dataEncoded));
+  document.getElementById('editForm').action = `/admin/richmenu/${id}/edit`;
+  document.getElementById('editLabel').value = data.label || '';
+  document.getElementById('editDisplayText').value = data.display_text || '';
+  document.getElementById('editUrl').value = data.url || '';
+  document.getElementById('editSortOrder').value = data.sort_order || 0;
+  document.getElementById('editIsActive').checked = !!data.is_active;
+  document.getElementById('editModal').style.display = 'flex';
+}
+function closeEditModal() {
+  document.getElementById('editModal').style.display = 'none';
+}
+document.getElementById('editModal').addEventListener('click', function(e) {
+  if (e.target === this) closeEditModal();
+});
+</script>
+</body>
+</html>

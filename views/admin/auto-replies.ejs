@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>自動返信設定 - COLOR KITCHEN</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<header>
+  <div class="header-inner">
+    <h1>COLOR KITCHEN 採用管理</h1>
+    <nav class="header-nav">
+      <a href="/admin" class="nav-link">応募者一覧</a>
+      <a href="/admin/templates" class="nav-link">テンプレート</a>
+      <a href="/admin/settings" class="nav-link">設定</a>
+      <a href="/admin/logout" class="logout-link">ログアウト</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <div class="page-header">
+    <h2>自動返信設定</h2>
+  </div>
+
+  <% if (msg) { %>
+  <div class="alert alert-success"><%= msg %></div>
+  <% } %>
+
+  <div class="card">
+    <h3>説明</h3>
+    <p style="font-size:0.88rem;color:#555;line-height:1.8">
+      各イベント時に自動でLINEを送信する設定です。<br>
+      OFFにすると自動送信されません。<br>
+      <code>{survey_url}</code> は見学後アンケートURLに自動置換されます。
+    </p>
+  </div>
+
+  <form action="/admin/auto-replies" method="POST">
+    <% autoReplies.forEach(r => { %>
+    <div class="card auto-reply-card">
+      <div class="auto-reply-header">
+        <h3 style="margin-bottom:0;border:none;padding:0;font-size:0.95rem;color:#333"><%= r.label || r.key %></h3>
+        <label class="toggle-switch">
+          <input type="checkbox" name="active_<%= r.key %>" value="1" <%= r.is_active ? 'checked' : '' %>>
+          <span class="toggle-slider"></span>
+          <span class="toggle-label" style="margin-left:0.5rem;font-size:0.82rem;color:#555">
+            <%= r.is_active ? 'ON' : 'OFF' %>
+          </span>
+        </label>
+      </div>
+      <div class="sub-text" style="margin-bottom:0.75rem">key: <code><%= r.key %></code></div>
+      <div class="form-group">
+        <label>返信内容</label>
+        <textarea name="content_<%= r.key %>" rows="4"><%= r.content || '' %></textarea>
+      </div>
+      <div class="sub-text">更新: <%= r.updated_at || '-' %></div>
+    </div>
+    <% }) %>
+    <div style="margin-top:1rem;margin-bottom:2rem">
+      <button type="submit" class="btn-primary">全ての設定を保存する</button>
+    </div>
+  </form>
+</main>
+
+<script>
+// トグルのON/OFFラベルをリアルタイム更新
+document.querySelectorAll('.toggle-switch input[type="checkbox"]').forEach(cb => {
+  cb.addEventListener('change', function() {
+    const label = this.closest('.toggle-switch').querySelector('.toggle-label');
+    if (label) label.textContent = this.checked ? 'ON' : 'OFF';
+  });
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LINE設定 - COLOR KITCHEN</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<header>
+  <div class="header-inner">
+    <h1>COLOR KITCHEN 採用管理</h1>
+    <nav class="header-nav">
+      <a href="/admin" class="nav-link">応募者一覧</a>
+      <a href="/admin/templates" class="nav-link">テンプレート</a>
+      <a href="/admin/settings" class="nav-link">設定</a>
+      <a href="/admin/logout" class="logout-link">ログアウト</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <div class="page-header">
+    <h2>LINE公式アカウント設定</h2>
+  </div>
+
+  <% if (msg) { %>
+  <div class="alert alert-success"><%= msg %></div>
+  <% } %>
+
+  <!-- 環境変数確認 -->
+  <div class="card">
+    <h3>環境変数の設定状況</h3>
+    <p style="font-size:0.82rem;color:#888;margin-bottom:1rem">サーバーの .env ファイルで設定してください</p>
+    <div class="env-grid">
+      <div class="env-item">
+        <span class="env-key">LINE_CHANNEL_ACCESS_TOKEN</span>
+        <span class="env-status <%= env.LINE_CHANNEL_ACCESS_TOKEN === '設定済み' ? 'status-ok' : 'status-ng' %>">
+          <%= env.LINE_CHANNEL_ACCESS_TOKEN %>
+        </span>
+      </div>
+      <div class="env-item">
+        <span class="env-key">LINE_CHANNEL_SECRET</span>
+        <span class="env-status <%= env.LINE_CHANNEL_SECRET === '設定済み' ? 'status-ok' : 'status-ng' %>">
+          <%= env.LINE_CHANNEL_SECRET %>
+        </span>
+      </div>
+      <div class="env-item">
+        <span class="env-key">APP_URL</span>
+        <span class="env-value"><%= env.APP_URL || '未設定' %></span>
+      </div>
+      <div class="env-item">
+        <span class="env-key">LIFF_ID</span>
+        <span class="env-value"><%= env.LIFF_ID || '未設定' %></span>
+      </div>
+      <div class="env-item">
+        <span class="env-key">LINE_OFFICIAL_CHAT_URL</span>
+        <span class="env-value"><%= env.LINE_OFFICIAL_CHAT_URL || '未設定' %></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- LINE設定情報 -->
+  <div class="card">
+    <h3>LINE公式アカウント情報</h3>
+    <p style="font-size:0.82rem;color:#888;margin-bottom:1rem">参照・共有用の情報を保存します</p>
+    <form action="/admin/settings/line" method="POST">
+      <div class="grid-2">
+        <div class="form-group">
+          <label>アカウント名</label>
+          <input type="text" name="account_name" value="<%= settings.account_name || '' %>" placeholder="例: COLOR KITCHEN 採用">
+        </div>
+        <div class="form-group">
+          <label>アカウントID（@xxx）</label>
+          <input type="text" name="account_id" value="<%= settings.account_id || '' %>" placeholder="例: @colorkitchen">
+        </div>
+        <div class="form-group">
+          <label>友達追加URL</label>
+          <input type="url" name="add_friend_url" value="<%= settings.add_friend_url || '' %>" placeholder="https://line.me/R/ti/p/...">
+        </div>
+        <div class="form-group">
+          <label>QRコードURL</label>
+          <input type="url" name="qr_code_url" value="<%= settings.qr_code_url || '' %>" placeholder="https://qr-official.line.me/...">
+        </div>
+        <div class="form-group">
+          <label>Webhook URL（設定値）</label>
+          <input type="url" name="webhook_url" value="<%= settings.webhook_url || '' %>" placeholder="例: https://your-app.onrender.com/webhook">
+          <small>LINE DevelopersのWebhook URLを記録する用</small>
+        </div>
+        <div class="form-group">
+          <label>LIFF URL</label>
+          <input type="url" name="liff_url" value="<%= settings.liff_url || '' %>" placeholder="https://liff.line.me/...">
+        </div>
+      </div>
+      <button type="submit" class="btn-primary">保存する</button>
+    </form>
+  </div>
+
+  <!-- リンク -->
+  <div class="card">
+    <h3>関連ページ</h3>
+    <div style="display:flex;flex-wrap:wrap;gap:0.75rem">
+      <a href="/admin/richmenu" class="btn">リッチメニュー設定</a>
+      <a href="/admin/auto-replies" class="btn">自動返信設定</a>
+      <a href="https://developers.line.biz/" target="_blank" rel="noopener" class="btn" style="background:#06c755">LINE Developers</a>
+      <a href="https://manager.line.biz/" target="_blank" rel="noopener" class="btn" style="background:#06c755">LINE Official Account Manager</a>
+    </div>
+  </div>
+</main>
+</body>
+</html>

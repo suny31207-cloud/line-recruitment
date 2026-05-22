@@ -1,4 +1,4 @@
-// LINE採用管理システム
+// server.js - LINE採用管理システム v2 (SQLite + Google Sheetsバックアップ)
 require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
@@ -6,17 +6,27 @@ const line = require('@line/bot-sdk');
 const { google } = require('googleapis');
 const nodemailer = require('nodemailer');
 const path = require('path');
+const db = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const APP_URL = process.env.APP_URL || 'https://line-recruitment.onrender.com';
+const APP_URL = process.env.APP_URL || 'http://localhost:3000';
 const LIFF_ID = process.env.LIFF_ID || '';
+
+// ===== ステータス定義 =====
+const STATUSES = [
+  '応募直後', 'アンケート未回答', 'アンケート回答済み', '確認待ち',
+  '見学誘導中', '見学予約済み', '見学対応済み',
+  '見学後アンケート送信済み', '見学後アンケート回答済み',
+  '面接調整中', '面接予約済み', '面接対応済み',
+  '入社確認中', '入社承諾', '辞退', '不採用', '対応完了', 'ブロック済み'
+];
+const STORES = ['三軒茶屋店','経堂店','桜新町店','溝口店','阿佐ヶ谷店','都立大学店','学芸大学店','高円寺店','たまプラーザ店','町田店','表参道店'];
 
 // ===== Express設定 =====
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 app.use(express.static(path.join(__dirname, 'public')));
-// /webhook はline.middlewareが自前でbody読み込みするため除外
 app.use('/admin', express.urlencoded({ extended: true }));
 app.use('/survey', express.urlencoded({ extended: true }));
 
@@ -25,7 +35,7 @@ app.use(session({
   secret: process.env.SESSION_SECRET || 'line-recruit-secret-2026',
   resave: false,
   saveUninitialized: false,
-  cookie: { maxAge: 8 * 60 * 60 * 1000 }, // 8時間
+  cookie: { maxAge: 8 * 60 * 60 * 1000 },
 }));
 
 // ===== LINE設定 =====
@@ -38,7 +48,7 @@ if (!process.env.LINE_CHANNEL_ACCESS_TOKEN) {
   console.warn('[WARN] LINE認証情報が未設定です');
 }
 
-// ===== Google Sheets設定 =====
+// ===== Google Sheets設定（バックアップ用） =====
 const googleAuth = new google.auth.GoogleAuth({
   credentials: {
     client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
@@ -50,119 +60,59 @@ const sheets = google.sheets({ version: 'v4', auth: googleAuth });
 const SHEET_ID = process.env.GOOGLE_SHEET_ID;
 const SHEET_NAME = '採用管理';
 
-// ===== 列定義（A〜Y = 0〜24）=====
-const COL = {
-  登録日時: 0, LINEユーザーID: 1, 氏名: 2, 性別: 3, 年齢: 4,
-  携帯番号: 5, 最寄駅: 6, 希望店舗: 7, 希望雇用形態: 8, 勤務開始希望日: 9,
-  美容師経験: 10, サイドシャンプーありなし: 11, 希望内容: 12, 現在ステータス: 13,
-  見学予約日: 14, 面接予定日: 15, 回答日時: 16, 回答結果: 17, 最終LINE送信日時: 18, 備考: 19,
-  要返信: 20, 最新問い合わせ内容: 21, 最新問い合わせ日時: 22, 最終LINE受信日時: 23, 最終想定外自動返信日時: 24,
-};
-const COL_COUNT = 25;
-const HEADERS = [
-  '登録日時', 'LINEユーザーID', '氏名', '性別', '年齢', '携帯番号',
-  '最寄駅', '希望店舗', '希望雇用形態', '勤務開始希望日', '美容師経験',
-  'サイドシャンプーありなし', '希望内容', '現在ステータス', '見学予約日',
-  '面接予定日', '回答日時', '回答結果', '最終LINE送信日時', '備考',
-  '要返信', '最新問い合わせ内容', '最新問い合わせ日時', '最終LINE受信日時', '最終想定外メッセージ自動返信日時',
-];
-const STATUSES = ['未対応', '見学対応済み', '面接対応済み', '対応完了'];
-const STORES = ['三軒茶屋店','経堂店','桜新町店','溝口店','阿佐ヶ谷店','都立大学店','学芸大学店','高円寺店','たまプラーザ店','町田店','表参道店'];
-
-// ===== 管理者シート定義 =====
-const ADMIN_SHEET = '管理者';
-const ACOL = { 登録日時: 0, ID: 1, パスワード: 2, 名前: 3, メールアドレス: 4 };
-
 // ===== メール設定 =====
 const mailer = nodemailer.createTransport({
   service: 'gmail',
   auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
 });
 
+// ===== ヘルパー関数 =====
 function nowJST() {
   return new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
 }
 
-// ===== Google Sheets操作 =====
-async function getSheetData() {
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: SHEET_ID,
-    range: `${SHEET_NAME}!A:Y`,
-  });
-  return res.data.values || [];
+function getAutoReply(key) {
+  const r = db.prepare('SELECT * FROM auto_replies WHERE key=?').get(key);
+  if (!r || !r.is_active) return null;
+  return r.content;
 }
 
-async function findRowByUserId(userId) {
-  const data = await getSheetData();
-  for (let i = 1; i < data.length; i++) {
-    if (data[i]?.[COL.LINEユーザーID] === userId) {
-      return { rowIndex: i, rowData: data[i] };
-    }
+function saveMessage(lineUserId, direction, content, sentBy = 'bot') {
+  db.prepare('INSERT INTO messages (line_user_id, direction, content, sent_at, sent_by) VALUES (?,?,?,?,?)')
+    .run(lineUserId, direction, content, nowJST(), sentBy);
+}
+
+function upsertCandidate(lineUserId, updates) {
+  const existing = db.prepare('SELECT * FROM candidates WHERE line_user_id=?').get(lineUserId);
+  if (existing) {
+    const sets = Object.keys(updates).map(k => `${k}=?`).join(',');
+    db.prepare(`UPDATE candidates SET ${sets} WHERE line_user_id=?`)
+      .run(...Object.values(updates), lineUserId);
+  } else {
+    const cols = ['line_user_id', 'registered_at', ...Object.keys(updates)];
+    const vals = [lineUserId, nowJST(), ...Object.values(updates)];
+    db.prepare(`INSERT INTO candidates (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`)
+      .run(...vals);
   }
-  return null;
 }
 
-function padRow(row) {
-  const r = Array.isArray(row) ? [...row] : [];
-  while (r.length < COL_COUNT) r.push('');
-  return r;
-}
-
-async function appendRow(values) {
-  await sheets.spreadsheets.values.append({
-    spreadsheetId: SHEET_ID,
-    range: `${SHEET_NAME}!A:Y`,
-    valueInputOption: 'USER_ENTERED',
-    requestBody: { values: [padRow(values)] },
-  });
-}
-
-async function updateRow(rowIndex, values) {
-  await sheets.spreadsheets.values.update({
-    spreadsheetId: SHEET_ID,
-    range: `${SHEET_NAME}!A${rowIndex + 1}:Y${rowIndex + 1}`,
-    valueInputOption: 'USER_ENTERED',
-    requestBody: { values: [padRow(values)] },
-  });
-}
-
-// ===== 管理者シート操作 =====
-async function getAdminSheetData() {
-  const res = await sheets.spreadsheets.values.get({
-    spreadsheetId: SHEET_ID,
-    range: `${ADMIN_SHEET}!A:E`,
-  });
-  return res.data.values || [];
-}
-
-async function getAllAdminEmails() {
+// ===== メール通知 =====
+function getAllAdminEmails() {
   const emails = new Set();
-  if (process.env.NOTIFY_EMAIL_TO) process.env.NOTIFY_EMAIL_TO.split(',').forEach(e => emails.add(e.trim()));
+  if (process.env.NOTIFY_EMAIL_TO) {
+    process.env.NOTIFY_EMAIL_TO.split(',').forEach(e => emails.add(e.trim()));
+  }
   try {
-    const data = await getAdminSheetData();
-    for (let i = 1; i < data.length; i++) {
-      const email = (data[i] || [])[ACOL.メールアドレス];
-      if (email) emails.add(email.trim());
-    }
+    const admins = db.prepare('SELECT email FROM admins WHERE email IS NOT NULL AND email != ""').all();
+    admins.forEach(a => emails.add(a.email.trim()));
   } catch (e) {}
   return [...emails];
 }
 
-async function findAdminAccount(id) {
-  try {
-    const data = await getAdminSheetData();
-    for (let i = 1; i < data.length; i++) {
-      if ((data[i] || [])[ACOL.ID] === id) return { rowIndex: i, row: data[i] };
-    }
-  } catch (e) {}
-  return null;
-}
-
-// ===== メール通知 =====
 async function sendNotification(subject, body) {
   if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) return;
   try {
-    const to = await getAllAdminEmails();
+    const to = getAllAdminEmails();
     if (!to.length) return;
     await mailer.sendMail({
       from: `COLOR KITCHEN 採用システム <${process.env.GMAIL_USER}>`,
@@ -174,55 +124,50 @@ async function sendNotification(subject, body) {
   } catch (e) { console.error('[ERROR] メール送信失敗:', e.message); }
 }
 
-// LINEユーザーIDをキーに追加 or 更新
-async function upsertCandidate(userId, updates) {
-  const existing = await findRowByUserId(userId);
-  if (existing) {
-    const row = padRow(existing.rowData);
-    Object.entries(updates).forEach(([i, v]) => { row[Number(i)] = v ?? ''; });
-    await updateRow(existing.rowIndex, row);
-  } else {
-    const row = new Array(COL_COUNT).fill('');
-    row[COL.登録日時] = nowJST();
-    row[COL.LINEユーザーID] = userId;
-    row[COL.現在ステータス] = '未対応';
-    Object.entries(updates).forEach(([i, v]) => { row[Number(i)] = v ?? ''; });
-    await appendRow(row);
-  }
+// ===== Google Sheets バックアップ（オプション） =====
+async function sheetsBackupCandidate(candidate) {
+  if (!SHEET_ID) return;
+  try {
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId: SHEET_ID,
+      range: `${SHEET_NAME}!A:C`,
+    });
+    const rows = res.data.values || [];
+    let targetRow = -1;
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i]?.[1] === candidate.line_user_id) { targetRow = i + 1; break; }
+    }
+    const values = [[
+      candidate.registered_at || '', candidate.line_user_id || '',
+      candidate.name || '', candidate.gender || '', candidate.age || '',
+      candidate.phone || '', candidate.station || '', candidate.store || '',
+      candidate.employment || '', candidate.start_date || '', candidate.experience || '',
+      candidate.side_shampoo || '', candidate.preference || '', candidate.status || '',
+      candidate.visit_date || '', candidate.interview_date || '',
+      candidate.answer_date || '', candidate.answer || '',
+      candidate.last_sent || '', candidate.note || '',
+      candidate.needs_reply || '', candidate.latest_inquiry || '',
+      candidate.latest_inquiry_date || '', candidate.last_received || '',
+    ]];
+    if (targetRow > 0) {
+      await sheets.spreadsheets.values.update({
+        spreadsheetId: SHEET_ID,
+        range: `${SHEET_NAME}!A${targetRow}:X${targetRow}`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values },
+      });
+    } else {
+      await sheets.spreadsheets.values.append({
+        spreadsheetId: SHEET_ID,
+        range: `${SHEET_NAME}!A:X`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values },
+      });
+    }
+  } catch (e) { console.warn('[WARN] Sheetsバックアップ失敗:', e.message); }
 }
 
 // ===== LINEメッセージ構築 =====
-function buildGreeting() {
-  return {
-    type: 'text',
-    text: 'こんにちは！\nCOLOR KITCHEN採用担当です☺️\n\nまずは気軽に、\n・見学希望\n・面接希望\n\nから選んでください✨',
-  };
-}
-
-function buildSurveyLink(userId) {
-  // LIFF URLはパス追加形式が不安定なため直リンクを使用
-  const url = `${APP_URL}/survey/${userId}`;
-  return {
-    type: 'text',
-    text: `ありがとうございます！\n続けて下記のアンケートにご記入ください。\n\n▼ アンケートはこちら\n${url}`,
-  };
-}
-
-function buildChoiceButtons() {
-  return {
-    type: 'template',
-    altText: '見学希望・面接希望をお選びください',
-    template: {
-      type: 'buttons',
-      text: '見学希望または面接希望をお選びください',
-      actions: [
-        { type: 'message', label: '見学希望', text: '見学希望' },
-        { type: 'message', label: '面接希望', text: '面接希望' },
-      ],
-    },
-  };
-}
-
 function buildInterviewMessages(displayName) {
   return [
     {
@@ -245,29 +190,6 @@ function buildInterviewMessages(displayName) {
   ];
 }
 
-function buildScheduleMessage(name, type, date) {
-  const typeLabel = type === 'visit' ? '見学' : '面接';
-  return [
-    {
-      type: 'text',
-      text: `${name}様\n\n${typeLabel}日程が決まりましたのでお知らせします。\n\n【${typeLabel}予定日】\n${date}\n\nご確認のうえ、下記よりお返事ください。`,
-    },
-    {
-      type: 'template',
-      altText: `${typeLabel}日程の確認（アプリ画面でご確認ください）`,
-      template: {
-        type: 'buttons',
-        title: `${typeLabel}日程の確認`,
-        text: `${date} のご都合はいかがでしょうか？`,
-        actions: [
-          { type: 'postback', label: '確認しました', data: `action=confirm_schedule&type=${type}`, displayText: '確認しました' },
-          { type: 'postback', label: '日程変更を希望する', data: `action=request_change&type=${type}`, displayText: '日程変更を希望する' },
-        ],
-      },
-    },
-  ];
-}
-
 // ===== Webhookイベントハンドラ =====
 async function handleFollow(event) {
   const userId = event.source.userId;
@@ -277,99 +199,91 @@ async function handleFollow(event) {
     displayName = p.displayName;
   } catch (e) { console.error('[WARN] profile取得失敗:', e.message); }
 
-  // ★ 先にLINE返信を送る
-  await client.replyMessage(event.replyToken, [
-    buildGreeting(),
-    buildChoiceButtons(),
-  ]);
-  // ★ その後にシート更新
-  await upsertCandidate(userId, { [COL.氏名]: displayName });
+  upsertCandidate(userId, {
+    display_name: displayName,
+    status: '応募直後',
+  });
+
+  const greetingContent = getAutoReply('greeting');
+  const surveyUrl = `${APP_URL}/survey/${userId}`;
+
+  const msgs = [];
+  if (greetingContent) {
+    msgs.push({ type: 'text', text: greetingContent });
+  }
+  msgs.push({
+    type: 'text',
+    text: `ありがとうございます！\n続けて下記のアンケートにご記入ください。\n\n▼ アンケートはこちら\n${surveyUrl}`,
+  });
+
+  try {
+    await client.replyMessage(event.replyToken, msgs);
+    const sentContent = msgs.map(m => m.text).join('\n---\n');
+    saveMessage(userId, 'out', sentContent, 'bot');
+    upsertCandidate(userId, { last_sent: nowJST() });
+  } catch (e) { console.error('[ERROR] follow返信失敗:', e.message); }
+
+  try {
+    const c = db.prepare('SELECT * FROM candidates WHERE line_user_id=?').get(userId);
+    await sendNotification(
+      `【新規応募】${displayName}様が友達追加しました`,
+      `${displayName}様（${userId}）が友達追加しました。\n\n▼ 管理画面\n${APP_URL}/admin/candidates/${userId}`
+    );
+    if (c) await sheetsBackupCandidate(c);
+  } catch (e) { console.error('[ERROR] follow後処理失敗:', e.message); }
+
   console.log(`[FOLLOW] ${displayName} (${userId})`);
 }
 
-// 候補日時らしい文章かチェック（数字＋日付キーワードが含まれる）
-function looksLikeDates(text) {
-  const hasNumber = /\d/.test(text);
-  const hasDateMarker = /[月日\/：:]|第\d|午前|午後|\d+時/.test(text);
-  return hasNumber && hasDateMarker;
+async function handleUnfollow(event) {
+  const userId = event.source.userId;
+  upsertCandidate(userId, {
+    is_blocked: 1,
+    blocked_at: nowJST(),
+    status: 'ブロック済み',
+  });
+  console.log(`[UNFOLLOW/BLOCK] ${userId}`);
+  try {
+    await sendNotification(
+      `【ブロック】応募者がブロックしました`,
+      `LINE ID: ${userId} がブロック/友達削除しました。\n\n▼ 管理画面\n${APP_URL}/admin/candidates/${userId}`
+    );
+  } catch (e) { console.error('[ERROR] ブロック通知メール失敗:', e.message); }
 }
 
 async function handleMessage(event) {
   const userId = event.source.userId;
   const text = event.message.text?.trim();
+  if (!text) return;
 
-  // 見学/面接ボタン選択
-  if (text === '見学希望' || text === '面接希望') {
-    await client.replyMessage(event.replyToken, {
-      type: 'text',
-      text: `「${text}」を承りました！\n\nご都合の良い候補日時を3つ、このチャットに返信してください。\n\n＜例＞\n第1希望：6/5（木）14:00〜\n第2希望：6/7（土）11:00〜\n第3希望：6/8（日）15:00〜`,
-    });
-    await upsertCandidate(userId, {
-      [COL.希望内容]: text,
-      [COL.備考]: '__AWAITING_DATES',
-      [COL.最終LINE受信日時]: nowJST(),
-    });
-    return;
-  }
-
-  const existing = await findRowByUserId(userId);
-
-  // 候補日時待ち → 日付形式の内容のみ受け付ける
-  if (existing) {
-    const row = padRow(existing.rowData);
-    if ((row[COL.備考] || '').startsWith('__AWAITING_DATES')) {
-      if (looksLikeDates(text)) {
-        await client.replyMessage(event.replyToken, [
-          { type: 'text', text: '候補日時を承りました！\n続けてアンケートへのご記入をお願いします。' },
-          buildSurveyLink(userId),
-        ]);
-        await upsertCandidate(userId, {
-          [COL.備考]: `【候補日時】\n${text}`,
-          [COL.最終LINE受信日時]: nowJST(),
-        });
-        return;
-      }
-      // 日付形式でない → 想定外として処理
-      console.log(`[UNEXPECTED] 候補日時待ち中に日付以外のメッセージ: ${userId} → "${text}"`);
-    }
-  }
-
-  // ===== 想定外メッセージ処理 =====
-  // (未登録・希望未選択・候補日時待ちで日付以外・その他すべてここに集約)
-  console.log(`[UNEXPECTED] 想定外メッセージ受信: ${userId} → "${text}"`);
+  saveMessage(userId, 'in', text);
 
   const now = nowJST();
-
-  // 未登録の場合はプロフィール名で登録（upsertで新規作成される）
   let nameForNew = null;
+  const existing = db.prepare('SELECT * FROM candidates WHERE line_user_id=?').get(userId);
   if (!existing) {
     try { const p = await client.getProfile(userId); nameForNew = p.displayName; } catch (e) {}
   }
 
-  // ★ 先にLINE返信（replyTokenは時間制限あり）
-  try {
-    await client.replyMessage(event.replyToken, {
-      type: 'text',
-      text: '担当者より折り返しご連絡いたします。\n恐れ入りますが、少々お待ちください。',
-    });
-    console.log(`[UNEXPECTED] 自動返信送信完了: ${userId}`);
-  } catch (e) {
-    console.error('[ERROR] 想定外メッセージ自動返信失敗:', e.message);
+  const updateData = {
+    needs_reply: '要返信',
+    latest_inquiry: text,
+    latest_inquiry_date: now,
+    last_received: now,
+  };
+  if (nameForNew) {
+    updateData.display_name = nameForNew;
   }
+  upsertCandidate(userId, updateData);
 
-  // ★ シート更新
-  try {
-    const updateData = {
-      [COL.要返信]: '要返信',
-      [COL.最新問い合わせ内容]: text,
-      [COL.最新問い合わせ日時]: now,
-      [COL.最終LINE受信日時]: now,
-      [COL.最終想定外自動返信日時]: now,
-    };
-    if (nameForNew) updateData[COL.氏名] = nameForNew;
-    await upsertCandidate(userId, updateData);
-  } catch (e) {
-    console.error('[ERROR] 想定外メッセージ シート更新失敗:', e.message);
+  const unexpectedContent = getAutoReply('unexpected');
+  if (unexpectedContent) {
+    try {
+      await client.replyMessage(event.replyToken, { type: 'text', text: unexpectedContent });
+      saveMessage(userId, 'out', unexpectedContent, 'bot');
+      upsertCandidate(userId, { last_sent: now, last_auto_reply: now });
+      console.log(`[MSG] 想定外自動返信送信: ${userId}`);
+    } catch (e) { console.error('[ERROR] 想定外返信失敗:', e.message); }
   }
 }
 
@@ -377,70 +291,37 @@ async function handlePostback(event) {
   const userId = event.source.userId;
   const params = new URLSearchParams(event.postback.data);
   const action = params.get('action');
-  const type = params.get('type'); // 'visit' or 'interview'
 
-  // 入社/辞退
   if (action === 'join' || action === 'decline') {
-    const existing = await findRowByUserId(userId);
-    if (existing && padRow(existing.rowData)[COL.現在ステータス] === '対応完了') {
-      await client.replyMessage(event.replyToken, {
-        type: 'text', text: '既にご回答を受け付けております。ありがとうございました。',
-      });
-      return;
-    }
-    const result = action === 'join' ? '入社希望' : '辞退';
-    const replyText = action === 'join'
-      ? 'ご回答ありがとうございます。\n「入社を希望する」として受付いたしました。\n担当者より改めてご連絡いたします。'
-      : 'ご回答ありがとうございます。\n「辞退する」として受付いたしました。\nこの度はご検討いただき、誠にありがとうございました。';
-    const answerTime = nowJST();
+    const isJoin = action === 'join';
+    const answerText = isJoin ? '入社希望' : '辞退';
+    const statusText = isJoin ? '入社承諾' : '辞退';
+    const replyKey = isJoin ? 'join_confirm' : 'decline_confirm';
+    const replyContent = getAutoReply(replyKey) || (isJoin
+      ? 'ご回答ありがとうございます。\n入社希望として承りました。\n担当者より改めてご連絡いたします。'
+      : 'ご回答ありがとうございます。\n辞退として承りました。この度はご検討いただきありがとうございました。');
+
+    upsertCandidate(userId, {
+      answer: answerText,
+      answer_date: nowJST(),
+      status: statusText,
+    });
+
     try {
-      await upsertCandidate(userId, {
-        [COL.回答日時]: answerTime,
-        [COL.回答結果]: result,
-        [COL.現在ステータス]: '対応完了',
-      });
-      console.log(`[ANSWER] ${userId} → ${result}`);
-      // 入社/辞退メール通知
-      const answerRow = await findRowByUserId(userId);
-      const answerName = answerRow ? padRow(answerRow.rowData)[COL.氏名] : userId;
+      await client.replyMessage(event.replyToken, { type: 'text', text: replyContent });
+      saveMessage(userId, 'out', replyContent, 'bot');
+      upsertCandidate(userId, { last_sent: nowJST() });
+    } catch (e) { console.error('[ERROR] postback返信失敗:', e.message); }
+
+    try {
+      const c = db.prepare('SELECT * FROM candidates WHERE line_user_id=?').get(userId);
+      const name = c?.name || c?.display_name || userId;
       await sendNotification(
-        `【採用回答】${answerName}様より「${result}」の回答がありました`,
-        `${answerName}様より回答がありました。\n\n` +
-        `回答結果：${result}\n回答日時：${answerTime}\n\n` +
-        `▼ 管理画面\n${APP_URL}/admin/candidates/${userId}`
+        `【採用回答】${name}様より「${answerText}」の回答がありました`,
+        `${name}様より回答がありました。\n\n回答結果：${answerText}\n回答日時：${nowJST()}\n\n▼ 管理画面\n${APP_URL}/admin/candidates/${userId}`
       );
-    } catch (e) { console.error('[ERROR] sheets書き込み失敗:', e.message); }
-    await client.replyMessage(event.replyToken, [{ type: 'text', text: replyText }]);
-    return;
-  }
-
-  // 日程確認
-  if (action === 'confirm_schedule') {
-    const typeLabel = type === 'visit' ? '見学' : '面接';
-    await client.replyMessage(event.replyToken, {
-      type: 'text',
-      text: `ご確認ありがとうございます。\n${typeLabel}日程を承りました。\n当日お待ちしております！`,
-    });
-    return;
-  }
-
-  // 日程変更希望
-  if (action === 'request_change') {
-    const typeLabel = type === 'visit' ? '見学' : '面接';
-    try {
-      const existing = await findRowByUserId(userId);
-      if (existing) {
-        const row = padRow(existing.rowData);
-        const prevNote = row[COL.備考] || '';
-        const changeNote = `【${typeLabel}日程変更希望】${nowJST()}`;
-        const newNote = prevNote ? `${prevNote}\n${changeNote}` : changeNote;
-        await upsertCandidate(userId, { [COL.備考]: newNote });
-      }
-    } catch (e) { console.error('[ERROR] 変更希望メモ失敗:', e.message); }
-    await client.replyMessage(event.replyToken, {
-      type: 'text',
-      text: `${typeLabel}日程の変更ご希望を承りました。\n担当者より改めてご連絡いたします。\nご不便をおかけして申し訳ございません。`,
-    });
+      if (c) await sheetsBackupCandidate(c);
+    } catch (e) { console.error('[ERROR] postback後処理失敗:', e.message); }
     return;
   }
 }
@@ -451,6 +332,7 @@ app.post('/webhook', line.middleware(lineConfig), async (req, res) => {
   for (const event of req.body.events) {
     try {
       if (event.type === 'follow') await handleFollow(event);
+      else if (event.type === 'unfollow') await handleUnfollow(event);
       else if (event.type === 'message' && event.message?.type === 'text') await handleMessage(event);
       else if (event.type === 'postback') await handlePostback(event);
     } catch (e) {
@@ -459,30 +341,35 @@ app.post('/webhook', line.middleware(lineConfig), async (req, res) => {
   }
 });
 
+// ===== 認証チェックミドルウェア =====
+function requireAuth(req, res, next) {
+  if (req.session.adminLoggedIn) return next();
+  res.redirect('/admin/login');
+}
+
 // ===== 管理者ログイン =====
 app.get('/admin/login', (req, res) => {
   if (req.session.adminLoggedIn) return res.redirect('/admin');
   res.render('admin/login', { error: null });
 });
 
-app.post('/admin/login', async (req, res) => {
+app.post('/admin/login', (req, res) => {
   const { id, password } = req.body;
   const masterId = process.env.ADMIN_ID || 'admin';
-  try {
-    const found = await findAdminAccount(id);
-    if (found) {
-      // シートに登録済み → シートのパスワードのみ有効（env varは無効）
-      if ((found.row || [])[ACOL.パスワード] === password) {
-        req.session.adminLoggedIn = true;
-        req.session.adminId = id;
-        req.session.isMaster = (id === masterId);
-        return res.redirect('/admin');
-      }
-      return res.render('admin/login', { error: 'IDまたはパスワードが違います' });
+  const masterPass = process.env.ADMIN_PASSWORD || 'colorkitchen2026';
+
+  const found = db.prepare('SELECT * FROM admins WHERE admin_id=?').get(id);
+  if (found) {
+    if (found.password === password) {
+      req.session.adminLoggedIn = true;
+      req.session.adminId = id;
+      req.session.isMaster = (id === masterId);
+      return res.redirect('/admin');
     }
-  } catch (e) { console.error('[ERROR] 管理者シート参照失敗:', e.message); }
-  // シート未登録のマスター管理者 → env var フォールバック
-  if (id === masterId && password === (process.env.ADMIN_PASSWORD || 'colorkitchen2026')) {
+    return res.render('admin/login', { error: 'IDまたはパスワードが違います' });
+  }
+  // DBに未登録のマスター管理者フォールバック
+  if (id === masterId && password === masterPass) {
     req.session.adminLoggedIn = true;
     req.session.adminId = id;
     req.session.isMaster = true;
@@ -495,64 +382,292 @@ app.get('/admin/logout', (req, res) => {
   req.session.destroy(() => res.redirect('/admin/login'));
 });
 
-// ===== 認証チェックミドルウェア =====
-function requireAuth(req, res, next) {
-  if (req.session.adminLoggedIn) return next();
-  res.redirect('/admin/login');
-}
-
-// ===== 管理者設定 =====
-app.get('/admin/settings', requireAuth, async (req, res) => {
-  const masterId = process.env.ADMIN_ID || 'admin';
+// ===== 管理画面：一覧 =====
+app.get('/admin', requireAuth, (req, res) => {
   try {
-    let admins = [];
-    let masterInfo = null;
-    const data = await getAdminSheetData();
-    admins = data.slice(1).map(row => ({
-      id: row[ACOL.ID] || '', name: row[ACOL.名前] || '', email: row[ACOL.メールアドレス] || '', registeredAt: row[ACOL.登録日時] || '',
-    })).filter(a => a.id);
-    const masterInSheet = admins.find(a => a.id === masterId);
-    if (masterInSheet) {
-      masterInfo = masterInSheet;
-      admins = admins.filter(a => a.id !== masterId);
+    const candidates = db.prepare('SELECT * FROM candidates ORDER BY registered_at DESC').all();
+    const candidatesWithMessages = candidates.map(c => {
+      const recentMessages = db.prepare(
+        'SELECT * FROM messages WHERE line_user_id=? ORDER BY sent_at DESC LIMIT 5'
+      ).all(c.line_user_id);
+      return { ...c, recentMessages };
+    });
+    res.render('admin/index', {
+      candidates: candidatesWithMessages,
+      statuses: STATUSES,
+    });
+  } catch (e) {
+    console.error('[ERROR] 一覧取得失敗:', e.message);
+    res.status(500).send('エラー: ' + e.message);
+  }
+});
+
+// ===== 管理画面：詳細 =====
+app.get('/admin/candidates/:uid', requireAuth, (req, res) => {
+  try {
+    const c = db.prepare('SELECT * FROM candidates WHERE line_user_id=?').get(req.params.uid);
+    if (!c) return res.status(404).send('応募者が見つかりません');
+    const messages = db.prepare(
+      'SELECT * FROM messages WHERE line_user_id=? ORDER BY sent_at ASC'
+    ).all(req.params.uid);
+    const visitSurvey = db.prepare(
+      'SELECT * FROM visit_surveys WHERE line_user_id=? ORDER BY submitted_at DESC LIMIT 1'
+    ).get(req.params.uid);
+    const templates = db.prepare('SELECT * FROM templates WHERE is_active=1 ORDER BY id').all();
+    const lineOfficialChatUrl = process.env.LINE_OFFICIAL_CHAT_URL || '';
+    res.render('admin/detail', {
+      c,
+      messages,
+      visitSurvey: visitSurvey || null,
+      templates,
+      statuses: STATUSES,
+      stores: STORES,
+      msg: req.query.msg || '',
+      lineOfficialChatUrl,
+    });
+  } catch (e) {
+    console.error('[ERROR] 詳細取得失敗:', e.message);
+    res.status(500).send('エラー: ' + e.message);
+  }
+});
+
+// ===== 管理画面：更新 =====
+app.post('/admin/candidates/:uid', requireAuth, (req, res) => {
+  const userId = req.params.uid;
+  const b = req.body;
+  try {
+    const prev = db.prepare('SELECT * FROM candidates WHERE line_user_id=?').get(userId);
+    if (!prev) return res.status(404).send('応募者が見つかりません');
+
+    upsertCandidate(userId, {
+      name: b.name || '',
+      kana: b.kana || '',
+      gender: b.gender || '',
+      age: b.age || '',
+      phone: b.phone || '',
+      station: b.station || '',
+      store: b.store || '',
+      employment: b.employment || '',
+      start_date: b.start_date || '',
+      experience: b.experience || '',
+      side_shampoo: b.side_shampoo || '',
+      preference: b.preference || '',
+      status: b.status || prev.status,
+      visit_date: b.visit_date || '',
+      interview_date: b.interview_date || '',
+      note: b.note || '',
+    });
+
+    if (b.status && b.status !== prev.status) {
+      console.log(`[STATUS] ${userId}: ${prev.status} → ${b.status}`);
     }
-    res.render('admin/settings', { admins, masterInfo, masterAdminId: masterId, msg: req.query.msg || '', error: null, isMaster: req.session.isMaster, editAdmin: null });
+
+    // 面接対応済みに変更 → 入社/辞退ボタンを自動送信
+    if (b.status === '面接対応済み' && prev.status !== '面接対応済み') {
+      const name = b.name || prev.name || '応募者';
+      client.pushMessage(userId, buildInterviewMessages(name))
+        .then(() => {
+          const sentContent = `[面接後入社確認ボタン送信] ${name}様`;
+          saveMessage(userId, 'out', sentContent, req.session.adminId || 'bot');
+          upsertCandidate(userId, { last_sent: nowJST() });
+          console.log(`[AUTO-SEND] 面接後ボタン送信: ${userId}`);
+        })
+        .catch(e => console.error('[ERROR] LINE push失敗:', e.message));
+    }
+
+    res.redirect(`/admin/candidates/${userId}?msg=${encodeURIComponent('更新しました')}`);
+  } catch (e) {
+    console.error('[ERROR] 更新失敗:', e.message);
+    res.status(500).send('エラー: ' + e.message);
+  }
+});
+
+// ===== 管理画面：LINE個別送信 =====
+app.post('/admin/candidates/:uid/send', requireAuth, async (req, res) => {
+  const userId = req.params.uid;
+  const { messageType, customText, template_id } = req.body;
+  try {
+    const c = db.prepare('SELECT * FROM candidates WHERE line_user_id=?').get(userId);
+    if (!c) return res.status(404).send('応募者が見つかりません');
+    const name = c.name || c.display_name || '応募者';
+
+    let msgs;
+    let logContent;
+
+    if (messageType === 'interview_followup') {
+      msgs = buildInterviewMessages(name);
+      logContent = '[面接後入社確認]';
+    } else if (messageType === 'visit_invite') {
+      const content = getAutoReply('visit_invite') || '担当者より見学についてご案内します。\nご都合のよい日時をお知らせください。';
+      msgs = [{ type: 'text', text: content }];
+      logContent = content;
+    } else if (messageType === 'rejection') {
+      const content = getAutoReply('rejection') || 'この度はCOLOR KITCHENにご応募いただきありがとうございました。\n慎重に検討いたしました結果、今回は採用を見送らせていただきます。';
+      msgs = [{ type: 'text', text: content }];
+      logContent = content;
+      upsertCandidate(userId, { status: '不採用' });
+    } else if (messageType === 'visit_survey') {
+      const surveyUrl = `${APP_URL}/survey-visit/${userId}`;
+      let content = getAutoReply('visit_survey_request') || '本日は見学にお越しいただきありがとうございました！\n引き続き見学後のアンケートにご回答いただけますか？\n\n▼アンケートはこちら\n{survey_url}';
+      content = content.replace('{survey_url}', surveyUrl);
+      msgs = [{ type: 'text', text: content }];
+      logContent = content;
+      upsertCandidate(userId, { status: '見学後アンケート送信済み' });
+    } else if (messageType === 'template' && template_id) {
+      const tmpl = db.prepare('SELECT * FROM templates WHERE id=?').get(template_id);
+      if (!tmpl) return res.status(400).send('テンプレートが見つかりません');
+      msgs = [{ type: 'text', text: tmpl.content }];
+      logContent = tmpl.content;
+    } else if (messageType === 'custom' && customText) {
+      msgs = [{ type: 'text', text: customText }];
+      logContent = customText;
+    } else {
+      return res.status(400).send('送信タイプが不正です');
+    }
+
+    await client.pushMessage(userId, msgs);
+    saveMessage(userId, 'out', logContent, req.session.adminId || 'admin');
+    upsertCandidate(userId, { last_sent: nowJST() });
+    if (c.needs_reply === '要返信') {
+      upsertCandidate(userId, { needs_reply: '対応済み' });
+    }
+
+    res.redirect(`/admin/candidates/${userId}?msg=${encodeURIComponent('LINEを送信しました')}`);
+  } catch (e) {
+    console.error('[ERROR] LINE送信失敗:', e.message);
+    res.redirect(`/admin/candidates/${userId}?msg=${encodeURIComponent('送信失敗: ' + e.message)}`);
+  }
+});
+
+// ===== 管理画面：要返信→対応済み =====
+app.post('/admin/candidates/:uid/mark-replied', requireAuth, (req, res) => {
+  const userId = req.params.uid;
+  try {
+    upsertCandidate(userId, { needs_reply: '対応済み' });
+    console.log(`[MARK-REPLIED] 要返信→対応済み: ${userId}`);
+    res.redirect(`/admin/candidates/${userId}?msg=${encodeURIComponent('要返信を対応済みにしました')}`);
+  } catch (e) {
+    res.status(500).send('エラー: ' + e.message);
+  }
+});
+
+// ===== テンプレート管理 =====
+app.get('/admin/templates', requireAuth, (req, res) => {
+  try {
+    const templates = db.prepare('SELECT * FROM templates ORDER BY id').all();
+    res.render('admin/templates', { templates, msg: req.query.msg || '' });
   } catch (e) { res.status(500).send('エラー: ' + e.message); }
 });
 
-app.post('/admin/settings/add', requireAuth, async (req, res) => {
-  const { id, password, name, email } = req.body;
-  if (!id || !password || !name) return res.redirect('/admin/settings?msg=' + encodeURIComponent('ID・パスワード・名前は必須です'));
+app.post('/admin/templates', requireAuth, (req, res) => {
+  const { name, purpose, content } = req.body;
+  if (!name || !content) return res.redirect('/admin/templates?msg=' + encodeURIComponent('名前と内容は必須です'));
   try {
-    const existing = await findAdminAccount(id);
-    if (existing) return res.redirect('/admin/settings?msg=' + encodeURIComponent('そのIDは既に使用されています'));
-    if (id === (process.env.ADMIN_ID || 'admin')) return res.redirect('/admin/settings?msg=' + encodeURIComponent('そのIDは使用できません'));
-    await sheets.spreadsheets.values.append({
-      spreadsheetId: SHEET_ID,
-      range: `${ADMIN_SHEET}!A:E`,
-      valueInputOption: 'USER_ENTERED',
-      requestBody: { values: [[nowJST(), id, password, name, email || '']] },
+    db.prepare('INSERT INTO templates (name, purpose, content, is_active, created_at, updated_at) VALUES (?,?,?,1,?,?)')
+      .run(name, purpose || '', content, nowJST(), nowJST());
+    res.redirect('/admin/templates?msg=' + encodeURIComponent('テンプレートを追加しました'));
+  } catch (e) { res.status(500).send('エラー: ' + e.message); }
+});
+
+app.get('/admin/templates/:id/edit', requireAuth, (req, res) => {
+  try {
+    const tmpl = db.prepare('SELECT * FROM templates WHERE id=?').get(req.params.id);
+    if (!tmpl) return res.redirect('/admin/templates?msg=' + encodeURIComponent('テンプレートが見つかりません'));
+    const templates = db.prepare('SELECT * FROM templates ORDER BY id').all();
+    res.render('admin/templates', { templates, editTemplate: tmpl, msg: req.query.msg || '' });
+  } catch (e) { res.status(500).send('エラー: ' + e.message); }
+});
+
+app.post('/admin/templates/:id/edit', requireAuth, (req, res) => {
+  const { name, purpose, content, is_active } = req.body;
+  if (!name || !content) return res.redirect(`/admin/templates/${req.params.id}/edit?msg=` + encodeURIComponent('名前と内容は必須です'));
+  try {
+    db.prepare('UPDATE templates SET name=?, purpose=?, content=?, is_active=?, updated_at=? WHERE id=?')
+      .run(name, purpose || '', content, is_active ? 1 : 0, nowJST(), req.params.id);
+    res.redirect('/admin/templates?msg=' + encodeURIComponent('テンプレートを更新しました'));
+  } catch (e) { res.status(500).send('エラー: ' + e.message); }
+});
+
+app.post('/admin/templates/:id/delete', requireAuth, (req, res) => {
+  try {
+    db.prepare('DELETE FROM templates WHERE id=?').run(req.params.id);
+    res.redirect('/admin/templates?msg=' + encodeURIComponent('テンプレートを削除しました'));
+  } catch (e) { res.status(500).send('エラー: ' + e.message); }
+});
+
+// ===== 自動返信設定 =====
+app.get('/admin/auto-replies', requireAuth, (req, res) => {
+  try {
+    const autoReplies = db.prepare('SELECT * FROM auto_replies ORDER BY id').all();
+    res.render('admin/auto-replies', { autoReplies, msg: req.query.msg || '' });
+  } catch (e) { res.status(500).send('エラー: ' + e.message); }
+});
+
+app.post('/admin/auto-replies', requireAuth, (req, res) => {
+  try {
+    const updates = req.body;
+    // key_xxx = content, active_xxx = 1/0 の形式で受け取る
+    const keys = db.prepare('SELECT key FROM auto_replies').all().map(r => r.key);
+    for (const key of keys) {
+      const content = updates[`content_${key}`];
+      const isActive = updates[`active_${key}`] ? 1 : 0;
+      if (content !== undefined) {
+        db.prepare('UPDATE auto_replies SET content=?, is_active=?, updated_at=? WHERE key=?')
+          .run(content, isActive, nowJST(), key);
+      }
+    }
+    res.redirect('/admin/auto-replies?msg=' + encodeURIComponent('自動返信設定を保存しました'));
+  } catch (e) { res.status(500).send('エラー: ' + e.message); }
+});
+
+// ===== 管理者設定 =====
+app.get('/admin/settings', requireAuth, (req, res) => {
+  try {
+    const masterId = process.env.ADMIN_ID || 'admin';
+    const allAdmins = db.prepare('SELECT * FROM admins ORDER BY registered_at').all();
+    const masterInfo = allAdmins.find(a => a.admin_id === masterId) || null;
+    const admins = allAdmins.filter(a => a.admin_id !== masterId);
+    res.render('admin/settings', {
+      admins, masterInfo, masterAdminId: masterId,
+      msg: req.query.msg || '', error: null,
+      isMaster: req.session.isMaster,
+      editAdmin: null,
     });
+  } catch (e) { res.status(500).send('エラー: ' + e.message); }
+});
+
+app.post('/admin/settings/add', requireAuth, (req, res) => {
+  const { id, password, name, email, role, store } = req.body;
+  if (!id || !password || !name) return res.redirect('/admin/settings?msg=' + encodeURIComponent('ID・パスワード・名前は必須です'));
+  const masterId = process.env.ADMIN_ID || 'admin';
+  if (id === masterId) return res.redirect('/admin/settings?msg=' + encodeURIComponent('そのIDは使用できません'));
+  try {
+    const existing = db.prepare('SELECT id FROM admins WHERE admin_id=?').get(id);
+    if (existing) return res.redirect('/admin/settings?msg=' + encodeURIComponent('そのIDは既に使用されています'));
+    db.prepare('INSERT INTO admins (admin_id, password, name, email, role, store, registered_at) VALUES (?,?,?,?,?,?,?)')
+      .run(id, password, name, email || '', role || 'admin', store || '', nowJST());
     res.redirect('/admin/settings?msg=' + encodeURIComponent(`${name}（${id}）を追加しました`));
   } catch (e) { res.status(500).send('エラー: ' + e.message); }
 });
 
-app.get('/admin/settings/edit/:adminId', requireAuth, async (req, res) => {
+app.get('/admin/settings/edit/:adminId', requireAuth, (req, res) => {
   const targetId = req.params.adminId;
   const masterId = process.env.ADMIN_ID || 'admin';
   try {
-    const found = await findAdminAccount(targetId);
+    const found = db.prepare('SELECT * FROM admins WHERE admin_id=?').get(targetId);
     let editAdmin;
     if (found) {
-      const row = found.row || [];
-      editAdmin = { id: row[ACOL.ID] || '', name: row[ACOL.名前] || '', email: row[ACOL.メールアドレス] || '' };
+      editAdmin = found;
     } else if (targetId === masterId) {
-      editAdmin = { id: masterId, name: '管理者', email: process.env.NOTIFY_EMAIL_TO || '' };
+      editAdmin = { admin_id: masterId, name: '管理者', email: process.env.NOTIFY_EMAIL_TO || '', role: 'master', store: '' };
     } else {
       return res.redirect('/admin/settings?msg=' + encodeURIComponent('アカウントが見つかりません'));
     }
+    const allAdmins = db.prepare('SELECT * FROM admins ORDER BY registered_at').all();
+    const masterInfo = allAdmins.find(a => a.admin_id === masterId) || null;
+    const admins = allAdmins.filter(a => a.admin_id !== masterId);
     res.render('admin/settings', {
-      admins: [], masterInfo: null, masterAdminId: masterId,
+      admins, masterInfo, masterAdminId: masterId,
       msg: req.query.msg || '', error: null,
       isMaster: req.session.isMaster,
       editAdmin,
@@ -560,34 +675,21 @@ app.get('/admin/settings/edit/:adminId', requireAuth, async (req, res) => {
   } catch (e) { res.status(500).send('エラー: ' + e.message); }
 });
 
-app.post('/admin/settings/edit/:adminId', requireAuth, async (req, res) => {
+app.post('/admin/settings/edit/:adminId', requireAuth, (req, res) => {
   const targetId = req.params.adminId;
   const masterId = process.env.ADMIN_ID || 'admin';
-  const { password, name, email } = req.body;
+  const { password, name, email, role, store } = req.body;
   if (!name) return res.redirect(`/admin/settings/edit/${targetId}?msg=` + encodeURIComponent('名前は必須です'));
   try {
-    const found = await findAdminAccount(targetId);
+    const found = db.prepare('SELECT * FROM admins WHERE admin_id=?').get(targetId);
     if (found) {
-      const row = [...(found.row || [])];
-      while (row.length < 5) row.push('');
-      row[ACOL.パスワード] = password || row[ACOL.パスワード];
-      row[ACOL.名前] = name;
-      row[ACOL.メールアドレス] = email || '';
-      await sheets.spreadsheets.values.update({
-        spreadsheetId: SHEET_ID,
-        range: `${ADMIN_SHEET}!A${found.rowIndex + 1}:E${found.rowIndex + 1}`,
-        valueInputOption: 'USER_ENTERED',
-        requestBody: { values: [row] },
-      });
+      const newPass = password || found.password;
+      db.prepare('UPDATE admins SET password=?, name=?, email=?, role=?, store=? WHERE admin_id=?')
+        .run(newPass, name, email || '', role || found.role, store || '', targetId);
     } else if (targetId === masterId) {
-      // マスター管理者がシート未登録の場合は新規追加
       if (!password) return res.redirect(`/admin/settings/edit/${targetId}?msg=` + encodeURIComponent('初回登録時はパスワードの入力が必要です'));
-      await sheets.spreadsheets.values.append({
-        spreadsheetId: SHEET_ID,
-        range: `${ADMIN_SHEET}!A:E`,
-        valueInputOption: 'USER_ENTERED',
-        requestBody: { values: [[nowJST(), targetId, password, name, email || '']] },
-      });
+      db.prepare('INSERT INTO admins (admin_id, password, name, email, role, store, registered_at) VALUES (?,?,?,?,?,?,?)')
+        .run(targetId, password, name, email || '', 'master', store || '', nowJST());
     } else {
       return res.redirect('/admin/settings?msg=' + encodeURIComponent('アカウントが見つかりません'));
     }
@@ -595,209 +697,86 @@ app.post('/admin/settings/edit/:adminId', requireAuth, async (req, res) => {
   } catch (e) { res.status(500).send('エラー: ' + e.message); }
 });
 
-app.post('/admin/settings/delete/:adminId', requireAuth, async (req, res) => {
+app.post('/admin/settings/delete/:adminId', requireAuth, (req, res) => {
   const targetId = req.params.adminId;
+  const masterId = process.env.ADMIN_ID || 'admin';
+  if (targetId === masterId) return res.redirect('/admin/settings?msg=' + encodeURIComponent('マスター管理者は削除できません'));
   try {
-    const found = await findAdminAccount(targetId);
-    if (!found) return res.redirect('/admin/settings?msg=' + encodeURIComponent('アカウントが見つかりません'));
-    // 該当行をクリア（空行にする）
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: SHEET_ID,
-      range: `${ADMIN_SHEET}!A${found.rowIndex + 1}:E${found.rowIndex + 1}`,
-      valueInputOption: 'USER_ENTERED',
-      requestBody: { values: [['', '', '', '', '']] },
-    });
+    db.prepare('DELETE FROM admins WHERE admin_id=?').run(targetId);
     res.redirect('/admin/settings?msg=' + encodeURIComponent(`${targetId} を削除しました`));
   } catch (e) { res.status(500).send('エラー: ' + e.message); }
 });
 
-// ===== 管理画面：一覧 =====
-app.get('/admin', requireAuth, async (req, res) => {
+// ===== LINE設定 =====
+app.get('/admin/settings/line', requireAuth, (req, res) => {
   try {
-    const data = await getSheetData();
-    const candidates = data.slice(1)
-      .map(row => {
-        const r = padRow(row);
-        const note = r[COL.備考] || '';
-        return {
-          lineUserId:      r[COL.LINEユーザーID],
-          name:            r[COL.氏名],
-          preference:      r[COL.希望内容],
-          status:          r[COL.現在ステータス] || '未対応',
-          visitDate:       r[COL.見学予約日],
-          interviewDate:   r[COL.面接予定日],
-          answer:          r[COL.回答結果],
-          lastSent:        r[COL.最終LINE送信日時],
-          registeredAt:    r[COL.登録日時],
-          store:           r[COL.希望店舗],
-          surveyDone:      !!(r[COL.携帯番号] || r[COL.希望店舗]),
-          changeRequested: note.includes('日程変更希望'),
-          needsReply:      r[COL.要返信] || '',
-          latestInquiry:   r[COL.最新問い合わせ内容] || '',
-          latestInquiryDate: r[COL.最新問い合わせ日時] || '',
-          lastReceived:    r[COL.最終LINE受信日時] || '',
-        };
-      })
-      .filter(c => c.lineUserId);
-    res.render('admin/index', { candidates, statuses: STATUSES });
+    const lineSettings = db.prepare('SELECT * FROM line_settings').all();
+    const settingsMap = {};
+    lineSettings.forEach(s => { settingsMap[s.key] = s.value; });
+    res.render('admin/settings-line', {
+      settings: settingsMap,
+      env: {
+        LINE_CHANNEL_ACCESS_TOKEN: process.env.LINE_CHANNEL_ACCESS_TOKEN ? '設定済み' : '未設定',
+        LINE_CHANNEL_SECRET: process.env.LINE_CHANNEL_SECRET ? '設定済み' : '未設定',
+        APP_URL: process.env.APP_URL || '',
+        LIFF_ID: process.env.LIFF_ID || '',
+        LINE_OFFICIAL_CHAT_URL: process.env.LINE_OFFICIAL_CHAT_URL || '',
+      },
+      msg: req.query.msg || '',
+    });
   } catch (e) { res.status(500).send('エラー: ' + e.message); }
 });
 
-// ===== 管理画面：詳細 =====
-app.get('/admin/candidates/:uid', requireAuth, async (req, res) => {
+app.post('/admin/settings/line', requireAuth, (req, res) => {
   try {
-    const found = await findRowByUserId(req.params.uid);
-    if (!found) return res.status(404).send('応募者が見つかりません');
-    const r = padRow(found.rowData);
-    const c = {
-      lineUserId: r[COL.LINEユーザーID],
-      name: r[COL.氏名], gender: r[COL.性別], age: r[COL.年齢],
-      phone: r[COL.携帯番号], station: r[COL.最寄駅],
-      store: r[COL.希望店舗], employment: r[COL.希望雇用形態],
-      startDate: r[COL.勤務開始希望日], experience: r[COL.美容師経験],
-      sideshampoo: r[COL.サイドシャンプーありなし], preference: r[COL.希望内容],
-      status: r[COL.現在ステータス] || '未対応',
-      visitDate: r[COL.見学予約日], interviewDate: r[COL.面接予定日],
-      answerDate: r[COL.回答日時], answer: r[COL.回答結果],
-      lastSent: r[COL.最終LINE送信日時], note: r[COL.備考],
-      registeredAt: r[COL.登録日時],
-      needsReply: r[COL.要返信] || '',
-      latestInquiry: r[COL.最新問い合わせ内容] || '',
-      latestInquiryDate: r[COL.最新問い合わせ日時] || '',
-      lastReceived: r[COL.最終LINE受信日時] || '',
+    const { account_name, account_id, add_friend_url, qr_code_url, webhook_url, liff_url } = req.body;
+    const updates = {
+      account_name, account_id, add_friend_url, qr_code_url, webhook_url, liff_url
     };
-    const lineOfficialChatUrl = process.env.LINE_OFFICIAL_CHAT_URL || '';
-    res.render('admin/detail', { c, statuses: STATUSES, stores: STORES, msg: req.query.msg || '', lineOfficialChatUrl });
-  } catch (e) { res.status(500).send('エラー: ' + e.message); }
-});
-
-// ===== 管理画面：更新 =====
-app.post('/admin/candidates/:uid', requireAuth, async (req, res) => {
-  const userId = req.params.uid;
-  const b = req.body;
-  try {
-    const found = await findRowByUserId(userId);
-    if (!found) return res.status(404).send('応募者が見つかりません');
-    const prevRow = padRow(found.rowData);
-    const prevStatus = prevRow[COL.現在ステータス];
-    const prevVisitDate = prevRow[COL.見学予約日];
-    const prevInterviewDate = prevRow[COL.面接予定日];
-
-    await upsertCandidate(userId, {
-      [COL.氏名]: b.name || '', [COL.性別]: b.gender || '',
-      [COL.年齢]: b.age || '', [COL.携帯番号]: b.phone || '',
-      [COL.最寄駅]: b.station || '', [COL.希望店舗]: b.store || '',
-      [COL.希望雇用形態]: b.employment || '', [COL.勤務開始希望日]: b.startDate || '',
-      [COL.美容師経験]: b.experience || '', [COL.サイドシャンプーありなし]: b.sideshampoo || '',
-      [COL.希望内容]: b.preference || '', [COL.現在ステータス]: b.status || prevStatus,
-      [COL.見学予約日]: b.visitDate || '', [COL.面接予定日]: b.interviewDate || '',
-      [COL.備考]: b.note || '',
-    });
-
-    // 面接対応済みに変更 → 入社/辞退ボタンを自動送信
-    if (b.status === '面接対応済み' && prevStatus !== '面接対応済み') {
-      try {
-        await client.pushMessage(userId, buildInterviewMessages(b.name || '応募者'));
-        await upsertCandidate(userId, { [COL.最終LINE送信日時]: nowJST() });
-        console.log(`[AUTO-SEND] 面接後ボタン送信: ${userId}`);
-      } catch (e) { console.error('[ERROR] LINE push失敗:', e.message); }
+    for (const [key, value] of Object.entries(updates)) {
+      if (value !== undefined) {
+        db.prepare('INSERT OR REPLACE INTO line_settings (key, value, updated_at) VALUES (?,?,?)')
+          .run(key, value || '', nowJST());
+      }
     }
-
-    // 見学予約日が新規設定または変更 → 日程確認メッセージ送信
-    if (b.visitDate && b.visitDate !== prevVisitDate) {
-      try {
-        await client.pushMessage(userId, buildScheduleMessage(b.name || '応募者', 'visit', b.visitDate));
-        await upsertCandidate(userId, { [COL.最終LINE送信日時]: nowJST() });
-        console.log(`[AUTO-SEND] 見学日程通知: ${userId}`);
-      } catch (e) { console.error('[ERROR] 見学日程LINE push失敗:', e.message); }
-    }
-
-    // 面接予定日が新規設定または変更 → 日程確認メッセージ送信
-    if (b.interviewDate && b.interviewDate !== prevInterviewDate) {
-      try {
-        await client.pushMessage(userId, buildScheduleMessage(b.name || '応募者', 'interview', b.interviewDate));
-        await upsertCandidate(userId, { [COL.最終LINE送信日時]: nowJST() });
-        console.log(`[AUTO-SEND] 面接日程通知: ${userId}`);
-      } catch (e) { console.error('[ERROR] 面接日程LINE push失敗:', e.message); }
-    }
-
-    res.redirect(`/admin/candidates/${userId}?msg=${encodeURIComponent('更新しました')}`);
+    res.redirect('/admin/settings/line?msg=' + encodeURIComponent('LINE設定を保存しました'));
   } catch (e) { res.status(500).send('エラー: ' + e.message); }
 });
 
-// ===== 管理画面：候補日時を承認して通知 =====
-app.post('/admin/candidates/:uid/confirm-date', requireAuth, async (req, res) => {
-  const userId = req.params.uid;
-  const { date, type } = req.body;
+// ===== リッチメニュー設定 =====
+app.get('/admin/richmenu', requireAuth, (req, res) => {
   try {
-    const found = await findRowByUserId(userId);
-    if (!found) return res.status(404).send('応募者が見つかりません');
-    const row = padRow(found.rowData);
-    const name = row[COL.氏名] || '応募者';
-    const typeLabel = type === 'visit' ? '見学' : '面接';
-    const dateCol = type === 'visit' ? COL.見学予約日 : COL.面接予定日;
-
-    // 備考の【候補日時】を【確認済み候補日時】に更新（ボタンを非表示にする）
-    const newNote = (row[COL.備考] || '').replace('【候補日時】', '【確認済み候補日時】');
-    await upsertCandidate(userId, {
-      [dateCol]: date,
-      [COL.備考]: newNote,
-    });
-
-    // 日程確定の通知をLINEで送信
-    await client.pushMessage(userId, {
-      type: 'text',
-      text: `${name}様\n\n${typeLabel}の日程が確定いたしました。\n\n【${typeLabel}予定日】\n${date}\n\nお時間になりましたらお待ちしております！\nご不明な点はお気軽にご連絡ください。`,
-    });
-    await upsertCandidate(userId, { [COL.最終LINE送信日時]: nowJST() });
-    console.log(`[CONFIRM-DATE] ${typeLabel}日程確定: ${userId} → ${date}`);
-
-    res.redirect(`/admin/candidates/${userId}?msg=${encodeURIComponent(`${typeLabel}日程を確定し、LINEで通知しました`)}`);
+    const richMenuItems = db.prepare('SELECT * FROM rich_menu ORDER BY sort_order, id').all();
+    res.render('admin/richmenu', { richMenuItems, msg: req.query.msg || '' });
   } catch (e) { res.status(500).send('エラー: ' + e.message); }
 });
 
-// ===== 管理画面：LINE個別送信 =====
-app.post('/admin/candidates/:uid/send', requireAuth, async (req, res) => {
-  const userId = req.params.uid;
-  const { messageType, customText } = req.body;
+app.post('/admin/richmenu', requireAuth, (req, res) => {
+  const { label, url, display_text, is_active, sort_order } = req.body;
   try {
-    const found = await findRowByUserId(userId);
-    if (!found) return res.status(404).send('応募者が見つかりません');
-    const name = padRow(found.rowData)[COL.氏名] || '応募者';
-
-    let msgs;
-    if (messageType === 'interview_followup') msgs = buildInterviewMessages(name);
-    else if (messageType === 'choice') msgs = [buildChoiceButtons()];
-    else if (messageType === 'custom' && customText) msgs = [{ type: 'text', text: customText }];
-    else return res.status(400).send('送信タイプが不正です');
-
-    await client.pushMessage(userId, msgs);
-    // 最終LINE送信日時を更新し、要返信ステータスを「対応済み」に自動更新
-    const updateData = { [COL.最終LINE送信日時]: nowJST() };
-    const currentRow = padRow(found.rowData);
-    if (currentRow[COL.要返信] === '要返信') {
-      updateData[COL.要返信] = '対応済み';
-    }
-    await upsertCandidate(userId, updateData);
-    res.redirect(`/admin/candidates/${userId}?msg=${encodeURIComponent('LINEを送信しました')}`);
+    db.prepare('INSERT INTO rich_menu (label, url, display_text, is_active, sort_order, updated_at) VALUES (?,?,?,?,?,?)')
+      .run(label || '', url || '', display_text || '', is_active ? 1 : 0, sort_order || 0, nowJST());
+    res.redirect('/admin/richmenu?msg=' + encodeURIComponent('リッチメニュー項目を追加しました'));
   } catch (e) { res.status(500).send('エラー: ' + e.message); }
 });
 
-// ===== 管理画面：要返信を対応済みにする =====
-app.post('/admin/candidates/:uid/mark-replied', requireAuth, async (req, res) => {
-  const userId = req.params.uid;
+app.post('/admin/richmenu/:id/edit', requireAuth, (req, res) => {
+  const { label, url, display_text, is_active, sort_order } = req.body;
   try {
-    const found = await findRowByUserId(userId);
-    if (!found) return res.status(404).send('応募者が見つかりません');
-    await upsertCandidate(userId, {
-      [COL.要返信]: '対応済み',
-    });
-    console.log(`[MARK-REPLIED] 要返信→対応済み: ${userId}`);
-    res.redirect(`/admin/candidates/${userId}?msg=${encodeURIComponent('要返信を対応済みにしました')}`);
+    db.prepare('UPDATE rich_menu SET label=?, url=?, display_text=?, is_active=?, sort_order=?, updated_at=? WHERE id=?')
+      .run(label || '', url || '', display_text || '', is_active ? 1 : 0, sort_order || 0, nowJST(), req.params.id);
+    res.redirect('/admin/richmenu?msg=' + encodeURIComponent('リッチメニューを更新しました'));
   } catch (e) { res.status(500).send('エラー: ' + e.message); }
 });
 
-// ===== アンケートフォーム（GET）=====
+app.post('/admin/richmenu/:id/delete', requireAuth, (req, res) => {
+  try {
+    db.prepare('DELETE FROM rich_menu WHERE id=?').run(req.params.id);
+    res.redirect('/admin/richmenu?msg=' + encodeURIComponent('リッチメニュー項目を削除しました'));
+  } catch (e) { res.status(500).send('エラー: ' + e.message); }
+});
+
+// ===== アンケートフォーム（応募時）=====
 app.get('/survey/:uid', (req, res) => {
   res.render('survey', {
     uid: req.params.uid, liffId: LIFF_ID, stores: STORES,
@@ -805,17 +784,15 @@ app.get('/survey/:uid', (req, res) => {
   });
 });
 
-// ===== アンケートフォーム（POST）=====
 app.post('/survey/:uid', async (req, res) => {
   const userId = req.params.uid;
-  const { name, gender, age, phone, station, store, employment, startDate, experience, sideshampoo } = req.body;
+  const { name, gender, age, phone, station, store, employment, start_date, experience, side_shampoo } = req.body;
 
   const renderError = (msg) => res.render('survey', {
     uid: userId, liffId: LIFF_ID, stores: STORES, error: msg, success: false, prefill: req.body,
   });
 
-  // バリデーション（全項目必須）
-  if (!name || !gender || !age || !phone || !station || !store || !employment || !startDate || !experience || !sideshampoo) {
+  if (!name || !gender || !age || !phone || !station || !store || !employment || !start_date || !experience || !side_shampoo) {
     return renderError('全ての項目を入力してください');
   }
   if (!/^[0-9]{10,11}$/.test(phone.replace(/[-\s]/g, ''))) {
@@ -823,102 +800,122 @@ app.post('/survey/:uid', async (req, res) => {
   }
 
   try {
-    await upsertCandidate(userId, {
-      [COL.氏名]: name, [COL.性別]: gender || '',
-      [COL.年齢]: age || '', [COL.携帯番号]: phone,
-      [COL.最寄駅]: station || '', [COL.希望店舗]: store,
-      [COL.希望雇用形態]: employment, [COL.勤務開始希望日]: startDate || '',
-      [COL.美容師経験]: experience, [COL.サイドシャンプーありなし]: sideshampoo || '',
+    upsertCandidate(userId, {
+      name, gender, age, phone, station, store, employment,
+      start_date, experience, side_shampoo,
+      status: 'アンケート回答済み',
     });
 
-    // ===== ここで即座に完了画面を返す =====
     res.render('survey', { uid: userId, liffId: LIFF_ID, stores: STORES, error: null, success: true, prefill: {} });
 
-    // ===== 以降はバックグラウンドで実行（レスポンスをブロックしない）=====
+    // バックグラウンド処理
     (async () => {
       try {
-        // メール通知
-        const notifyRow = (await findRowByUserId(userId))?.rowData || [];
-        const nr = padRow(notifyRow);
-        const candidateDatesNote = (nr[COL.備考] || '').includes('【候補日時】')
-          ? '\n\n' + nr[COL.備考].replace('__AWAITING_DATES', '')
-          : '';
+        const surveyContent = getAutoReply('survey_complete') || 'アンケートのご記入ありがとうございます！\n内容を確認のうえ、担当者よりご連絡いたします。\nしばらくお待ちください😊';
+        await client.pushMessage(userId, { type: 'text', text: surveyContent });
+        saveMessage(userId, 'out', surveyContent, 'bot');
+        upsertCandidate(userId, { last_sent: nowJST() });
+      } catch (e) { console.warn('[WARN] アンケート後LINE送信失敗:', e.message); }
+
+      try {
         await sendNotification(
           `【採用アンケート】新規回答：${name}`,
           `${name}様よりアンケートの回答がありました。\n\n` +
-          `氏名：${name}\n希望内容：${nr[COL.希望内容] || '-'}\n希望店舗：${store}\n` +
-          `携帯番号：${phone}\n美容師経験：${experience}` +
-          `${candidateDatesNote}\n\n` +
+          `氏名：${name}\n希望店舗：${store}\n携帯番号：${phone}\n美容師経験：${experience}\n\n` +
           `▼ 管理画面\n${APP_URL}/admin/candidates/${userId}`
         );
       } catch (e) { console.error('[ERROR] アンケート後メール通知失敗:', e.message); }
 
       try {
-        // LINE確認メッセージ送信
-        await client.pushMessage(userId, {
-          type: 'text',
-          text: 'アンケートのご記入ありがとうございます！\n内容を確認のうえ、担当者よりご連絡いたします。\nしばらくお待ちください😊',
-        });
-        await upsertCandidate(userId, { [COL.最終LINE送信日時]: nowJST() });
-      } catch (e) { console.warn('[WARN] アンケート後LINE送信失敗:', e.message); }
+        const c = db.prepare('SELECT * FROM candidates WHERE line_user_id=?').get(userId);
+        if (c) await sheetsBackupCandidate(c);
+      } catch (e) { console.warn('[WARN] アンケートSheetsバックアップ失敗:', e.message); }
     })();
+
   } catch (e) {
     console.error('[ERROR] アンケート保存失敗:', e.message);
     renderError('エラーが発生しました。もう一度お試しください。');
   }
 });
 
-// ===== ヘルスチェック =====
-app.get('/', (req, res) => res.send('LINE採用管理システム 稼働中'));
+// ===== 見学後アンケート =====
+app.get('/survey-visit/:uid', (req, res) => {
+  res.render('survey-visit', {
+    uid: req.params.uid, stores: STORES,
+    error: null, success: false, prefill: {},
+  });
+});
 
-// ===== シート初期化 =====
-async function initSheetHeader() {
+app.post('/survey-visit/:uid', async (req, res) => {
+  const userId = req.params.uid;
+  const {
+    visit_date, visit_store, impression, motivation, concerns,
+    anxiety, other_companies, desired_start, questions, wants_interview,
+  } = req.body;
+
   try {
-    const data = await getSheetData();
-    if (data.length === 0) {
-      await appendRow(HEADERS);
-      console.log('[INIT] ヘッダー行を追加しました');
-    }
-  } catch (e) {
-    if (e.message?.includes('Unable to parse range') || e.message?.includes('not found')) {
+    db.prepare(
+      `INSERT INTO visit_surveys
+        (line_user_id, visit_date, visit_store, impression, motivation, concerns, anxiety, other_companies, desired_start, questions, wants_interview, submitted_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).run(
+      userId, visit_date || '', visit_store || '', impression || '',
+      motivation || '', concerns || '', anxiety || '', other_companies || '',
+      desired_start || '', questions || '', wants_interview || '', nowJST()
+    );
+
+    upsertCandidate(userId, { status: '見学後アンケート回答済み' });
+
+    res.render('survey-visit', {
+      uid: userId, stores: STORES, error: null, success: true, prefill: {},
+    });
+
+    (async () => {
       try {
-        await sheets.spreadsheets.batchUpdate({
+        await sendNotification(
+          `【見学後アンケート】${userId}様が回答しました`,
+          `見学後アンケートの回答がありました。\n\nLINE ID: ${userId}\n見学日: ${visit_date || '-'}\n見学店舗: ${visit_store || '-'}\n面接希望: ${wants_interview || '-'}\n\n▼ 管理画面\n${APP_URL}/admin/candidates/${userId}`
+        );
+      } catch (e) { console.error('[ERROR] 見学後アンケート通知失敗:', e.message); }
+    })();
+
+  } catch (e) {
+    console.error('[ERROR] 見学後アンケート保存失敗:', e.message);
+    res.render('survey-visit', {
+      uid: userId, stores: STORES, error: 'エラーが発生しました。もう一度お試しください。', success: false, prefill: req.body,
+    });
+  }
+});
+
+// ===== ヘルスチェック =====
+app.get('/', (req, res) => res.send('LINE採用管理システム v2 稼働中'));
+
+// ===== サーバー起動 =====
+app.listen(PORT, () => {
+  console.log(`サーバー起動: http://localhost:${PORT}`);
+
+  // adminsが空ならシードを実行
+  const adminCount = db.prepare('SELECT COUNT(*) as cnt FROM admins').get();
+  const masterId = process.env.ADMIN_ID || 'admin';
+  const masterPass = process.env.ADMIN_PASSWORD;
+  if (adminCount.cnt === 0 && masterPass) {
+    db.prepare('INSERT OR IGNORE INTO admins (admin_id, password, name, email, role, registered_at) VALUES (?,?,?,?,?,?)')
+      .run(masterId, masterPass, '管理者', process.env.NOTIFY_EMAIL_TO || '', 'master', nowJST());
+    console.log(`[INIT] マスター管理者（${masterId}）をDBに登録しました`);
+  }
+
+  // Google Sheets初期化（オプション）
+  if (SHEET_ID) {
+    sheets.spreadsheets.values.get({
+      spreadsheetId: SHEET_ID,
+      range: `${SHEET_NAME}!A1:A1`,
+    }).catch(e => {
+      if (e.message?.includes('Unable to parse range') || e.message?.includes('not found')) {
+        sheets.spreadsheets.batchUpdate({
           spreadsheetId: SHEET_ID,
           requestBody: { requests: [{ addSheet: { properties: { title: SHEET_NAME } } }] },
-        });
-        await appendRow(HEADERS);
-        console.log('[INIT] シートを新規作成しヘッダーを追加しました');
-      } catch (e2) { console.warn('[WARN] シート作成失敗:', e2.message); }
-    } else {
-      console.warn('[WARN] シート初期化失敗:', e.message);
-    }
+        }).catch(e2 => console.warn('[WARN] シート作成失敗:', e2.message));
+      }
+    });
   }
-}
-
-async function initAdminSheet() {
-  try {
-    const data = await getAdminSheetData();
-    if (!data || data.length === 0) {
-      await sheets.spreadsheets.values.append({
-        spreadsheetId: SHEET_ID, range: `${ADMIN_SHEET}!A:E`, valueInputOption: 'USER_ENTERED',
-        requestBody: { values: [['登録日時', '管理者ID', 'パスワード', '名前', 'メールアドレス']] },
-      });
-    }
-  } catch (e) {
-    try {
-      await sheets.spreadsheets.batchUpdate({
-        spreadsheetId: SHEET_ID, requestBody: { requests: [{ addSheet: { properties: { title: ADMIN_SHEET } } }] },
-      });
-      await sheets.spreadsheets.values.append({
-        spreadsheetId: SHEET_ID, range: `${ADMIN_SHEET}!A:E`, valueInputOption: 'USER_ENTERED',
-        requestBody: { values: [['登録日時', '管理者ID', 'パスワード', '名前', 'メールアドレス']] },
-      });
-    } catch (e2) { console.warn('[WARN] 管理者シート作成失敗:', e2.message); }
-  }
-}
-
-app.listen(PORT, async () => {
-  console.log(`サーバー起動中: http://localhost:${PORT}`);
-  try { await initSheetHeader(); } catch (e) { console.warn('[WARN]', e.message); }
-  try { await initAdminSheet(); } catch (e) { console.warn('[WARN] 管理者シート:', e.message); }
 });

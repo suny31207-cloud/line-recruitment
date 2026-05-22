@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>見学後アンケート - COLOR KITCHEN</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="survey-container">
+  <div class="survey-header">
+    <h2>COLOR KITCHEN 見学後アンケート</h2>
+    <p>見学いただきありがとうございました！</p>
+  </div>
+  <div class="survey-body">
+
+    <% if (success) { %>
+    <div class="success-box">
+      <div class="success-icon">✅</div>
+      <h3>送信完了しました</h3>
+      <p>アンケートのご回答ありがとうございました。</p>
+      <p class="success-note">内容を確認のうえ、担当者よりご連絡いたします😊</p>
+    </div>
+
+    <% } else { %>
+
+    <% if (error) { %>
+    <div class="alert alert-error"><%= error %></div>
+    <% } %>
+
+    <p class="form-note">ご都合のよい範囲でご回答ください</p>
+
+    <form action="/survey-visit/<%= uid %>" method="POST">
+
+      <div class="grid-2">
+        <div class="form-group">
+          <label class="required">見学日</label>
+          <input type="date" name="visit_date" value="<%= prefill.visit_date || '' %>" required>
+        </div>
+        <div class="form-group">
+          <label>見学した店舗</label>
+          <select name="visit_store">
+            <option value="">選択してください</option>
+            <% stores.forEach(v => { %>
+            <option value="<%= v %>" <%= (prefill.visit_store||'')===v?'selected':'' %>><%= v %></option>
+            <% }) %>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>見学後の印象</label>
+        <textarea name="impression" rows="3" placeholder="店舗の雰囲気、スタッフの様子など自由にお書きください"><%= prefill.impression || '' %></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>入社意欲</label>
+        <select name="motivation">
+          <option value="">選択してください</option>
+          <% ['高い','ある程度ある','迷っている','低い'].forEach(v => { %>
+          <option value="<%= v %>" <%= (prefill.motivation||'')===v?'selected':'' %>><%= v %></option>
+          <% }) %>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>気になった点</label>
+        <textarea name="concerns" rows="3" placeholder="気になったことや確認したいことがあればご記入ください"><%= prefill.concerns || '' %></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>不安な点</label>
+        <textarea name="anxiety" rows="3" placeholder="入社にあたり不安な点があればご記入ください"><%= prefill.anxiety || '' %></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>他社の選考状況</label>
+        <textarea name="other_companies" rows="2" placeholder="他にご検討中の求人や選考中の企業があればご記入ください"><%= prefill.other_companies || '' %></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>希望入社時期</label>
+        <input type="month" name="desired_start" value="<%= prefill.desired_start || '' %>" placeholder="例: 2026-07">
+      </div>
+
+      <div class="form-group">
+        <label>担当者への質問</label>
+        <textarea name="questions" rows="3" placeholder="ご不明点や確認したいことがあればご記入ください"><%= prefill.questions || '' %></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>面接のご希望</label>
+        <select name="wants_interview">
+          <option value="">選択してください</option>
+          <% ['希望する','希望しない','まだ決まっていない'].forEach(v => { %>
+          <option value="<%= v %>" <%= (prefill.wants_interview||'')===v?'selected':'' %>><%= v %></option>
+          <% }) %>
+        </select>
+      </div>
+
+      <button type="submit" class="btn-submit-full">アンケートを送信する</button>
+    </form>
+
+    <% } %>
+  </div>
+</div>
+</body>
+</html>

@@ -38,7 +38,7 @@
       <div class="form-group">
         <label class="required">氏名</label>
         <input type="text" name="name" value="<%= prefill.name || '' %>"
-               placeholder="山田 太郎" required>
+               placeholder="山田 太郎" required autocomplete="name">
       </div>
 
       <div class="grid-2">
@@ -47,7 +47,7 @@
           <select name="gender" required>
             <option value="">選択してください</option>
             <% ['男性','女性','その他','回答しない'].forEach(v => { %>
-            <option value="<%= v %>" <%= (prefill.gender||'')=== v ?'selected':'' %>><%= v %></option>
+            <option value="<%= v %>" <%= (prefill.gender||'')===v?'selected':'' %>><%= v %></option>
             <% }) %>
           </select>
         </div>
@@ -61,7 +61,7 @@
       <div class="form-group">
         <label class="required">携帯番号</label>
         <input type="tel" name="phone" value="<%= prefill.phone || '' %>"
-               placeholder="09012345678" required>
+               placeholder="09012345678" required autocomplete="tel" inputmode="numeric">
         <small>ハイフンなし 10〜11桁</small>
       </div>
 
@@ -76,7 +76,7 @@
         <select name="store" required>
           <option value="">選択してください</option>
           <% stores.forEach(v => { %>
-          <option value="<%= v %>" <%= (prefill.store||'')=== v ?'selected':'' %>><%= v %></option>
+          <option value="<%= v %>" <%= (prefill.store||'')===v?'selected':'' %>><%= v %></option>
           <% }) %>
         </select>
       </div>
@@ -86,15 +86,15 @@
         <select name="employment" required>
           <option value="">選択してください</option>
           <% ['正社員','パート・アルバイト'].forEach(v => { %>
-          <option value="<%= v %>" <%= (prefill.employment||'')=== v ?'selected':'' %>><%= v %></option>
+          <option value="<%= v %>" <%= (prefill.employment||'')===v?'selected':'' %>><%= v %></option>
           <% }) %>
         </select>
       </div>
 
       <div class="form-group">
         <label class="required">勤務開始希望日</label>
-        <input type="text" name="startDate" value="<%= prefill.startDate || '' %>"
-               placeholder="2026年7月〜 など" required>
+        <input type="date" name="start_date" value="<%= prefill.start_date || '' %>" required>
+        <small>カレンダーからご選択ください</small>
       </div>
 
       <div class="form-group">
@@ -102,17 +102,17 @@
         <select name="experience" required>
           <option value="">選択してください</option>
           <% ['あり（5年以上）','あり（3〜5年）','あり（1〜3年）','あり（1年未満）','なし（見習い）','なし'].forEach(v => { %>
-          <option value="<%= v %>" <%= (prefill.experience||'')=== v ?'selected':'' %>><%= v %></option>
+          <option value="<%= v %>" <%= (prefill.experience||'')===v?'selected':'' %>><%= v %></option>
           <% }) %>
         </select>
       </div>
 
       <div class="form-group">
         <label class="required">サイドシャンプーの経験</label>
-        <select name="sideshampoo" required>
+        <select name="side_shampoo" required>
           <option value="">選択してください</option>
           <% ['あり','なし'].forEach(v => { %>
-          <option value="<%= v %>" <%= (prefill.sideshampoo||'')=== v ?'selected':'' %>><%= v %></option>
+          <option value="<%= v %>" <%= (prefill.side_shampoo||'')===v?'selected':'' %>><%= v %></option>
           <% }) %>
         </select>
       </div>

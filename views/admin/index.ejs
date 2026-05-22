@@ -8,107 +8,95 @@
 </head>
 <body>
 <header>
-  <div class="header-inner" style="display:flex;align-items:center;justify-content:space-between">
-    <h1>COLOR KITCHEN 採用管理システム</h1>
-    <div style="display:flex;gap:1rem;align-items:center">
-      <a href="/admin/settings" class="logout-link" style="color:#aad4c8">管理者設定</a>
+  <div class="header-inner">
+    <h1>COLOR KITCHEN 採用管理</h1>
+    <nav class="header-nav">
+      <a href="/admin/templates" class="nav-link">テンプレート</a>
+      <a href="/admin/auto-replies" class="nav-link">自動返信</a>
+      <a href="/admin/settings" class="nav-link">設定</a>
       <a href="/admin/logout" class="logout-link">ログアウト</a>
-    </div>
+    </nav>
   </div>
 </header>
 <main>
   <div class="page-header">
-    <h2>応募者一覧 <span class="count-badge"><%= candidates.length %>名</span></h2>
+    <%
+      const activeCount = candidates.filter(c => !c.is_blocked).length;
+      const needsReplyCount = candidates.filter(c => c.needs_reply === '要返信').length;
+    %>
+    <h2>応募者一覧 <span class="count-badge"><%= activeCount %>名</span></h2>
+    <% if (needsReplyCount > 0) { %>
+    <span class="badge-needs-reply badge-pulse"><%= needsReplyCount %>件 要返信</span>
+    <% } %>
   </div>
 
   <!-- フィルターバー -->
   <div class="filter-bar">
     <label>
-      <input type="checkbox" id="filterNeedsReply" onchange="toggleFilter()">
-      要返信のみ表示
+      <input type="checkbox" id="filterNeedsReply" onchange="applyFilters()">
+      要返信のみ
     </label>
-    <% const needsReplyCount = candidates.filter(c => c.needsReply === '要返信').length; %>
-    <% if (needsReplyCount > 0) { %>
-    <span class="badge-needs-reply"><%= needsReplyCount %>件 要返信</span>
-    <% } %>
+    <label>
+      <input type="checkbox" id="filterHideBlocked" checked onchange="applyFilters()">
+      ブロック済み除外
+    </label>
+    <select id="filterStatus" onchange="applyFilters()" class="filter-select">
+      <option value="">全ステータス</option>
+      <% statuses.forEach(s => { %>
+      <option value="<%= s %>"><%= s %></option>
+      <% }) %>
+    </select>
   </div>
 
   <div class="table-wrap">
-    <table>
+    <table id="candidatesTable">
       <thead>
         <tr>
-          <th>応募者名</th>
+          <th>氏名</th>
           <th>要返信</th>
-          <th>最新問い合わせ</th>
-          <th>希望内容</th>
           <th>ステータス</th>
-          <th>アンケート</th>
-          <th>見学予約日</th>
-          <th>面接予定日</th>
-          <th>回答結果</th>
-          <th>最終受信日時</th>
-          <th>登録日時</th>
+          <th>最寄駅</th>
+          <th>希望店舗</th>
+          <th>最終受信</th>
+          <th>登録日</th>
           <th></th>
         </tr>
       </thead>
       <tbody>
         <% if (candidates.length === 0) { %>
         <tr>
-          <td colspan="12" class="empty-row">応募者がいません</td>
+          <td colspan="8" class="empty-row">応募者がいません</td>
         </tr>
         <% } %>
         <% candidates.forEach(c => { %>
-        <tr class="<%= c.needsReply === '要返信' ? 'row-needs-reply' : '' %>" data-needs-reply="<%= c.needsReply === '要返信' ? '1' : '0' %>">
+        <tr
+          class="<%= c.needs_reply === '要返信' ? 'row-needs-reply' : '' %> <%= c.is_blocked ? 'row-blocked' : '' %>"
+          data-needs-reply="<%= c.needs_reply === '要返信' ? '1' : '0' %>"
+          data-blocked="<%= c.is_blocked ? '1' : '0' %>"
+          data-status="<%= c.status || '' %>"
+        >
           <td>
-            <strong><%= c.name || '(名前未登録)' %></strong>
-            <% if (c.changeRequested) { %><span class="change-indicator">🔔変更希望</span><% } %>
-            <div class="sub-text"><%= c.lineUserId %></div>
+            <strong><%= c.name || c.display_name || '(名前未登録)' %></strong>
+            <div class="sub-text"><%= c.line_user_id %></div>
           </td>
           <td>
-            <% if (c.needsReply === '要返信') { %>
+            <% if (c.needs_reply === '要返信') { %>
               <span class="badge-needs-reply">要返信</span>
-            <% } else if (c.needsReply === '対応済み') { %>
+            <% } else if (c.needs_reply === '対応済み') { %>
               <span class="badge-replied">対応済み</span>
-            <% } else { %>-<% } %>
+            <% } else { %><span class="text-muted">-</span><% } %>
           </td>
           <td>
-            <% if (c.latestInquiry) { %>
-              <div class="inquiry-preview" title="<%= c.latestInquiry %>"><%= c.latestInquiry %></div>
-              <div class="sub-text"><%= c.latestInquiryDate %></div>
-            <% } else { %>-<% } %>
-          </td>
-          <td><%= c.preference || '-' %></td>
-          <td>
-            <span class="status-badge status-<%= c.status.replace(/\s/g,'') %>">
-              <%= c.status %>
+            <span class="status-badge status-<%= (c.status || '').replace(/\s/g,'_') %>">
+              <%= c.status || '-' %>
             </span>
           </td>
+          <td class="small-text"><%= c.station || '-' %></td>
+          <td class="small-text"><%= c.store || '-' %></td>
+          <td class="small-text"><%= c.last_received || '-' %></td>
+          <td class="small-text"><%= (c.registered_at || '').substring(0,10) || '-' %></td>
           <td>
-            <% if (c.surveyDone) { %>
-              <span class="badge badge-done">回答済み</span>
-            <% } else { %>
-              <span class="badge badge-pending">未回答</span>
-            <% } %>
-          </td>
-          <td>
-            <%= c.visitDate || '-' %>
-            <% if (c.store) { %><div class="small-text"><%= c.store %></div><% } %>
-          </td>
-          <td>
-            <%= c.interviewDate || '-' %>
-            <% if (c.store) { %><div class="small-text"><%= c.store %></div><% } %>
-          </td>
-          <td>
-            <% if (c.answer) { %>
-              <span class="answer-badge answer-<%= c.answer === '入社希望' ? 'join' : 'decline' %>">
-                <%= c.answer %>
-              </span>
-            <% } else { %>-<% } %>
-          </td>
-          <td class="small-text"><%= c.lastReceived || '-' %></td>
-          <td class="small-text"><%= c.registeredAt || '-' %></td>
-          <td>
-            <a href="/admin/candidates/<%= c.lineUserId %>" class="btn btn-sm">詳細</a>
+            <a href="/admin/candidates/<%= c.line_user_id %>" class="btn btn-sm">詳細</a>
           </td>
         </tr>
         <% }) %>
@@ -118,16 +106,21 @@
 </main>
 
 <script>
-function toggleFilter() {
-  const checked = document.getElementById('filterNeedsReply').checked;
-  document.querySelectorAll('tbody tr[data-needs-reply]').forEach(row => {
-    if (checked && row.dataset.needsReply !== '1') {
-      row.style.display = 'none';
-    } else {
-      row.style.display = '';
-    }
+function applyFilters() {
+  const needsReplyOnly = document.getElementById('filterNeedsReply').checked;
+  const hideBlocked = document.getElementById('filterHideBlocked').checked;
+  const statusFilter = document.getElementById('filterStatus').value;
+
+  document.querySelectorAll('#candidatesTable tbody tr[data-needs-reply]').forEach(row => {
+    let show = true;
+    if (needsReplyOnly && row.dataset.needsReply !== '1') show = false;
+    if (hideBlocked && row.dataset.blocked === '1') show = false;
+    if (statusFilter && row.dataset.status !== statusFilter) show = false;
+    row.style.display = show ? '' : 'none';
   });
 }
+// 初期表示時にブロック済みを非表示
+applyFilters();
 </script>
 </body>
 </html>
