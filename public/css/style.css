@@ -278,4 +278,15 @@ tr:hover td { background: #fafbfc; }
   .action-buttons { gap: 0.5rem; }
   .btn-line-open, .btn-mark-replied { padding: 0.45rem 0.9rem; font-size: 0.8rem; }
   .chat-container { max-height: 300px; }
+
+  /* 一覧テーブル：スマホでは氏名・最終受信・詳細のみ */
+  .col-sp-hide { display: none !important; }
+  .sp-hidden { display: none !important; }
+  .sp-only { display: block !important; }
+
+  /* スマホ用テーブル調整 */
+  #candidatesTable th, #candidatesTable td { padding: 0.55rem 0.5rem; }
+  #candidatesTable td:first-child { max-width: 160px; }
+  #candidatesTable strong { font-size: 0.88rem; }
+  .last-received-col { font-size: 0.75rem; }
 }

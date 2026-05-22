@@ -53,12 +53,12 @@
       <thead>
         <tr>
           <th>氏名</th>
-          <th>要返信</th>
-          <th>ステータス</th>
-          <th>最寄駅</th>
-          <th>希望店舗</th>
+          <th class="col-sp-hide">要返信</th>
+          <th class="col-sp-hide">ステータス</th>
+          <th class="col-sp-hide">最寄駅</th>
+          <th class="col-sp-hide">希望店舗</th>
           <th>最終受信</th>
-          <th>登録日</th>
+          <th class="col-sp-hide">登録日</th>
           <th></th>
         </tr>
       </thead>
@@ -77,24 +77,30 @@
         >
           <td>
             <strong><%= c.name || c.display_name || '(名前未登録)' %></strong>
-            <div class="sub-text"><%= c.line_user_id %></div>
+            <div class="sub-text sp-hidden"><%= c.line_user_id %></div>
+            <div class="sp-only" style="margin-top:0.3rem;display:none">
+              <% if (c.needs_reply === '要返信') { %>
+                <span class="badge-needs-reply" style="font-size:0.68rem">要返信</span>
+              <% } %>
+              <span class="status-badge status-<%= (c.status || '').replace(/\s/g,'_') %>" style="font-size:0.68rem"><%= c.status || '-' %></span>
+            </div>
           </td>
-          <td>
+          <td class="col-sp-hide">
             <% if (c.needs_reply === '要返信') { %>
               <span class="badge-needs-reply">要返信</span>
             <% } else if (c.needs_reply === '対応済み') { %>
               <span class="badge-replied">対応済み</span>
             <% } else { %><span class="text-muted">-</span><% } %>
           </td>
-          <td>
+          <td class="col-sp-hide">
             <span class="status-badge status-<%= (c.status || '').replace(/\s/g,'_') %>">
               <%= c.status || '-' %>
             </span>
           </td>
-          <td class="small-text"><%= c.station || '-' %></td>
-          <td class="small-text"><%= c.store || '-' %></td>
+          <td class="small-text col-sp-hide"><%= c.station || '-' %></td>
+          <td class="small-text col-sp-hide"><%= c.store || '-' %></td>
           <td class="small-text"><%= c.last_received || '-' %></td>
-          <td class="small-text"><%= (c.registered_at || '').substring(0,10) || '-' %></td>
+          <td class="small-text col-sp-hide"><%= (c.registered_at || '').substring(0,10) || '-' %></td>
           <td>
             <a href="/admin/candidates/<%= c.line_user_id %>" class="btn btn-sm">詳細</a>
           </td>
