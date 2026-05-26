@@ -370,8 +370,14 @@ app.post('/webhook', line.middleware(lineConfig), async (req, res) => {
 
 // ===== 認証チェックミドルウェア =====
 function requireAuth(req, res, next) {
-  if (req.session.adminLoggedIn) return next();
-  res.redirect('/admin/login');
+  if (!req.session.adminLoggedIn) return res.redirect('/admin/login');
+  // 2FA未設定の場合はセットアップ画面へ強制誘導（セットアップ関連パスは除外）
+  if (req.session.require2faSetup) {
+    const allowed = ['/admin/security/2fa', '/admin/logout'];
+    const isAllowed = allowed.some(p => req.path === p || req.path.startsWith('/admin/security/2fa'));
+    if (!isAllowed) return res.redirect('/admin/security/2fa?setup=1');
+  }
+  next();
 }
 
 // ===== 管理者ログイン =====
@@ -388,7 +394,7 @@ app.post('/admin/login', (req, res) => {
   const found = db.prepare('SELECT * FROM admins WHERE admin_id=?').get(id);
   if (found) {
     if (found.password === password) {
-      // 2FA enabled → redirect to 2FA page
+      // 2FA有効 → 2FA入力画面へ
       if (found.two_factor_enabled === 1) {
         req.session.pendingAdminId = id;
         return res.redirect('/admin/two-factor');
@@ -398,6 +404,11 @@ app.post('/admin/login', (req, res) => {
       req.session.adminRole = found.role || 'admin';
       req.session.isMaster = (id === masterId);
       db.prepare('UPDATE admins SET last_login_at=? WHERE admin_id=?').run(nowJST(), id);
+      // 2FA未設定の場合はセットアップを強制
+      if (!found.two_factor_confirmed_at) {
+        req.session.require2faSetup = true;
+        return res.redirect('/admin/security/2fa?setup=1');
+      }
       return res.redirect('/admin');
     }
     return res.render('admin/login', { error: 'IDまたはパスワードが違います' });
@@ -879,7 +890,7 @@ app.post('/admin/two-factor', (req, res) => {
 // 2FA セキュリティ設定
 app.get('/admin/security/2fa', requireAuth, async (req, res) => {
   const admin = db.prepare('SELECT * FROM admins WHERE admin_id=?').get(req.session.adminId);
-  res.render('admin/security-2fa', { admin: admin || {}, msg: req.query.msg || '', error: null, qrDataUrl: null, secret: null, backupCodes: null });
+  res.render('admin/security-2fa', { admin: admin || {}, msg: req.query.msg || '', error: null, qrDataUrl: null, secret: null, backupCodes: null, setup: req.query.setup === '1' });
 });
 
 app.post('/admin/security/2fa/setup', requireAuth, async (req, res) => {
@@ -888,7 +899,7 @@ app.post('/admin/security/2fa/setup', requireAuth, async (req, res) => {
   db.prepare('UPDATE admins SET two_factor_secret=? WHERE admin_id=?').run(secret.base32, adminId);
   const qrDataUrl = await QRCode.toDataURL(secret.otpauth_url);
   const admin = db.prepare('SELECT * FROM admins WHERE admin_id=?').get(adminId);
-  res.render('admin/security-2fa', { admin: admin||{}, msg:'', error:null, qrDataUrl, secret: secret.base32, backupCodes: null });
+  res.render('admin/security-2fa', { admin: admin||{}, msg:'', error:null, qrDataUrl, secret: secret.base32, backupCodes: null, setup: req.session.require2faSetup || false });
 });
 
 app.post('/admin/security/2fa/verify', requireAuth, (req, res) => {
@@ -899,14 +910,16 @@ app.post('/admin/security/2fa/verify', requireAuth, (req, res) => {
 
   const verified = speakeasy.totp.verify({ secret: admin.two_factor_secret, encoding: 'base32', token: token?.replace(/\s/g,''), window: 2 });
   if (!verified) {
-    return res.render('admin/security-2fa', { admin, msg:'', error:'コードが正しくありません。もう一度お試しください', qrDataUrl: null, secret: admin.two_factor_secret, backupCodes: null });
+    return res.render('admin/security-2fa', { admin, msg:'', error:'コードが正しくありません。もう一度お試しください', qrDataUrl: null, secret: admin.two_factor_secret, backupCodes: null, setup: req.session.require2faSetup || false });
   }
 
   // Generate backup codes
   const backupCodes = Array.from({length:8}, () => Math.random().toString(36).substr(2,4).toUpperCase() + '-' + Math.random().toString(36).substr(2,4).toUpperCase());
   db.prepare('UPDATE admins SET two_factor_enabled=1, two_factor_confirmed_at=?, backup_codes_json=? WHERE admin_id=?')
     .run(nowJST(), JSON.stringify(backupCodes), adminId);
-  res.render('admin/security-2fa', { admin: db.prepare('SELECT * FROM admins WHERE admin_id=?').get(adminId)||{}, msg:'二段階認証が有効になりました', error:null, qrDataUrl:null, secret:null, backupCodes });
+  // 初回強制セットアップフラグを解除
+  req.session.require2faSetup = false;
+  res.render('admin/security-2fa', { admin: db.prepare('SELECT * FROM admins WHERE admin_id=?').get(adminId)||{}, msg:'二段階認証が有効になりました', error:null, qrDataUrl:null, secret:null, backupCodes, setup: false });
 });
 
 app.post('/admin/security/2fa/disable', requireAuth, (req, res) => {

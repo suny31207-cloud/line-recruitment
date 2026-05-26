@@ -26,6 +26,11 @@
   </div>
 </header>
 <main>
+  <% if (setup) { %>
+  <div class="alert alert-error" style="margin-bottom:1rem">
+    ⚠️ セキュリティ強化のため、管理画面を利用する前に二段階認証の設定が必要です。設定が完了するまで他のページへはアクセスできません。
+  </div>
+  <% } %>
   <div class="page-header">
     <h2>セキュリティ設定</h2>
   </div>
