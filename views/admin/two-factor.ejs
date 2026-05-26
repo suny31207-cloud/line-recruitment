@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>二段階認証 - COLOR KITCHEN 採用管理</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-box" style="max-width:400px">
+    <div class="login-logo">
+      <h1>COLOR KITCHEN</h1>
+      <p>二段階認証</p>
+    </div>
+
+    <% if (error) { %>
+    <div class="alert alert-error" style="margin-bottom:1.25rem"><%= error %></div>
+    <% } %>
+
+    <form action="/admin/two-factor" method="POST">
+      <div class="form-group">
+        <label>認証コード（6桁）</label>
+        <p style="font-size:0.82rem;color:#888;margin-bottom:0.5rem">Google Authenticatorの6桁コードを入力してください</p>
+        <input
+          type="text"
+          name="token"
+          maxlength="6"
+          inputmode="numeric"
+          autocomplete="one-time-code"
+          placeholder="000000"
+          style="font-size:1.5rem;text-align:center;letter-spacing:0.3em"
+          autofocus
+        >
+      </div>
+
+      <button type="submit" class="btn-submit-full" style="margin-top:1rem">認証する</button>
+    </form>
+
+    <hr style="margin:1.5rem 0;border:none;border-top:1px solid #eee">
+
+    <details>
+      <summary style="font-size:0.85rem;color:#888;cursor:pointer">バックアップコードを使用する</summary>
+      <form action="/admin/two-factor" method="POST" style="margin-top:1rem">
+        <div class="form-group">
+          <label>バックアップコード</label>
+          <input
+            type="text"
+            name="backup_code"
+            placeholder="XXXX-XXXX"
+            style="text-transform:uppercase"
+          >
+        </div>
+        <button type="submit" class="btn-secondary" style="width:100%">バックアップコードで認証</button>
+      </form>
+    </details>
+
+    <div style="margin-top:1.5rem;text-align:center">
+      <a href="/admin/login" style="font-size:0.82rem;color:#888">ログイン画面に戻る</a>
+    </div>
+  </div>
+</div>
+</body>
+</html>

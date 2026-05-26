@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= isNew ? '新規登録' : '編集' %> - 過去採用者 - COLOR KITCHEN 採用管理</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<header>
+  <div class="header-inner">
+    <h1><a href="/admin" style="color:white;text-decoration:none">COLOR KITCHEN 採用管理</a></h1>
+    <button class="hamburger" id="hamburger" aria-label="メニュー" onclick="toggleMenu()">
+      <span></span><span></span><span></span>
+    </button>
+    <nav class="header-nav" id="headerNav">
+      <a href="/admin" class="nav-link">応募者管理</a>
+      <a href="/admin/templates" class="nav-link">テンプレート</a>
+      <a href="/admin/auto-replies" class="nav-link">自動返信</a>
+      <a href="/admin/legacy-candidates" class="nav-link">過去採用者</a>
+      <a href="/admin/settings" class="nav-link">管理者設定</a>
+      <a href="/admin/security/2fa" class="nav-link">セキュリティ</a>
+      <a href="/admin/settings/line" class="nav-link">LINE設定</a>
+      <a href="/admin/logout" class="logout-link">ログアウト</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <a href="/admin/legacy-candidates" class="back-link">← 過去採用者一覧に戻る</a>
+
+  <div class="page-header">
+    <h2><%= isNew ? '過去採用者 新規登録' : '過去採用者 編集' %></h2>
+  </div>
+
+  <% if (msg) { %>
+  <div class="alert alert-success"><%= msg %></div>
+  <% } %>
+  <% if (error) { %>
+  <div class="alert alert-error"><%= error %></div>
+  <% } %>
+
+  <form action="<%= isNew ? '/admin/legacy-candidates' : '/admin/legacy-candidates/' + record.id + '/edit' %>" method="POST">
+
+    <!-- 基本情報 -->
+    <div class="card">
+      <h3>基本情報</h3>
+      <div class="grid-2">
+        <div class="form-group">
+          <label>氏名</label>
+          <input type="text" name="name" value="<%= record.name || '' %>" placeholder="山田 太郎">
+        </div>
+        <div class="form-group">
+          <label>フリガナ</label>
+          <input type="text" name="kana" value="<%= record.kana || '' %>" placeholder="ヤマダ タロウ">
+        </div>
+        <div class="form-group">
+          <label>性別</label>
+          <select name="gender">
+            <option value="">選択なし</option>
+            <% ['男性','女性','その他','回答しない'].forEach(v => { %>
+            <option value="<%= v %>" <%= record.gender===v?'selected':'' %>><%= v %></option>
+            <% }) %>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>年齢</label>
+          <input type="text" name="age" value="<%= record.age || '' %>" placeholder="25">
+        </div>
+        <div class="form-group">
+          <label>電話番号</label>
+          <input type="tel" name="phone" value="<%= record.phone || '' %>" placeholder="09012345678">
+        </div>
+        <div class="form-group">
+          <label>メールアドレス</label>
+          <input type="email" name="email" value="<%= record.email || '' %>" placeholder="example@email.com">
+        </div>
+        <div class="form-group">
+          <label>最寄駅</label>
+          <input type="text" name="nearest_station" value="<%= record.nearest_station || '' %>" placeholder="三軒茶屋">
+        </div>
+        <div class="form-group">
+          <label>希望店舗</label>
+          <select name="desired_store">
+            <option value="">選択なし</option>
+            <% stores.forEach(v => { %>
+            <option value="<%= v %>" <%= record.desired_store===v?'selected':'' %>><%= v %></option>
+            <% }) %>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>雇用形態</label>
+          <select name="employment_type">
+            <option value="">選択なし</option>
+            <% ['正社員','パート・アルバイト'].forEach(v => { %>
+            <option value="<%= v %>" <%= record.employment_type===v?'selected':'' %>><%= v %></option>
+            <% }) %>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- 日程情報 -->
+    <div class="card">
+      <h3>日程情報</h3>
+      <div class="grid-2">
+        <div class="form-group">
+          <label>応募日</label>
+          <input type="text" name="applied_date" value="<%= record.applied_date || '' %>" placeholder="2026/01/15">
+        </div>
+        <div class="form-group">
+          <label>見学日</label>
+          <input type="text" name="visit_date" value="<%= record.visit_date || '' %>" placeholder="2026/01/20 14:00">
+        </div>
+        <div class="form-group">
+          <label>面接日</label>
+          <input type="text" name="interview_date" value="<%= record.interview_date || '' %>" placeholder="2026/01/25 10:00">
+        </div>
+        <div class="form-group">
+          <label>採用決定日</label>
+          <input type="text" name="hired_date" value="<%= record.hired_date || '' %>" placeholder="2026/01/28">
+        </div>
+        <div class="form-group">
+          <label>入社日</label>
+          <input type="text" name="joined_date" value="<%= record.joined_date || '' %>" placeholder="2026/02/01">
+        </div>
+        <div class="form-group">
+          <label>退職日</label>
+          <input type="text" name="resigned_date" value="<%= record.resigned_date || '' %>" placeholder="2026/06/30">
+        </div>
+      </div>
+    </div>
+
+    <!-- 採用情報 -->
+    <div class="card">
+      <h3>採用情報</h3>
+      <div class="grid-2">
+        <div class="form-group">
+          <label>採用結果</label>
+          <select name="result">
+            <option value="">選択なし</option>
+            <% results.forEach(v => { %>
+            <option value="<%= v %>" <%= record.result===v?'selected':'' %>><%= v %></option>
+            <% }) %>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>在籍状況</label>
+          <select name="current_employment_status">
+            <option value="">選択なし</option>
+            <% employmentStatuses.forEach(v => { %>
+            <option value="<%= v %>" <%= record.current_employment_status===v?'selected':'' %>><%= v %></option>
+            <% }) %>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>採用媒体</label>
+          <input type="text" name="recruitment_media" value="<%= record.recruitment_media || '' %>" placeholder="Indeed、タウンワーク等">
+        </div>
+        <div class="form-group">
+          <label>採用費（円）</label>
+          <input type="number" name="recruitment_cost" value="<%= record.recruitment_cost ?? '' %>" placeholder="30000" min="0">
+          <% if (record.recruitment_cost != null && record.recruitment_cost !== '') { %>
+          <small><%= Number(record.recruitment_cost).toLocaleString('ja-JP') %>円</small>
+          <% } %>
+        </div>
+        <div class="form-group">
+          <label>担当者名</label>
+          <input type="text" name="assigned_staff" value="<%= record.assigned_staff || '' %>">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>旧メモ（移行データ）</label>
+        <textarea name="old_memo" rows="3"><%= record.old_memo || '' %></textarea>
+      </div>
+      <div class="form-group">
+        <label>備考</label>
+        <textarea name="note" rows="3"><%= record.note || '' %></textarea>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:0.75rem;margin-top:0.5rem">
+      <button type="submit" class="btn-primary"><%= isNew ? '登録する' : '更新する' %></button>
+      <a href="/admin/legacy-candidates" class="btn-secondary" style="display:inline-flex;align-items:center;text-decoration:none">キャンセル</a>
+    </div>
+  </form>
+</main>
+<script>
+function toggleMenu() {
+  document.getElementById('headerNav').classList.toggle('open');
+}
+</script>
+</body>
+</html>

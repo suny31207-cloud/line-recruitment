@@ -9,11 +9,18 @@
 <body>
 <header>
   <div class="header-inner">
-    <h1>COLOR KITCHEN 採用管理</h1>
-    <nav class="header-nav">
-      <a href="/admin" class="nav-link">応募者一覧</a>
+    <h1><a href="/admin" style="color:white;text-decoration:none">COLOR KITCHEN 採用管理</a></h1>
+    <button class="hamburger" id="hamburger" aria-label="メニュー" onclick="toggleMenu()">
+      <span></span><span></span><span></span>
+    </button>
+    <nav class="header-nav" id="headerNav">
+      <a href="/admin" class="nav-link">応募者管理</a>
       <a href="/admin/templates" class="nav-link">テンプレート</a>
-      <a href="/admin/settings" class="nav-link">設定</a>
+      <a href="/admin/auto-replies" class="nav-link">自動返信</a>
+      <a href="/admin/legacy-candidates" class="nav-link">過去採用者</a>
+      <a href="/admin/settings" class="nav-link">管理者設定</a>
+      <a href="/admin/security/2fa" class="nav-link">セキュリティ</a>
+      <a href="/admin/settings/line" class="nav-link">LINE設定</a>
       <a href="/admin/logout" class="logout-link">ログアウト</a>
     </nav>
   </div>
@@ -170,6 +177,10 @@ function closeEditModal() {
 document.getElementById('editModal').addEventListener('click', function(e) {
   if (e.target === this) closeEditModal();
 });
+
+function toggleMenu() {
+  document.getElementById('headerNav').classList.toggle('open');
+}
 </script>
 </body>
 </html>

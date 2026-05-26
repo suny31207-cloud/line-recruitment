@@ -7,6 +7,13 @@ const { google } = require('googleapis');
 const nodemailer = require('nodemailer');
 const path = require('path');
 const db = require('./db');
+const speakeasy = require('speakeasy');
+const QRCode = require('qrcode');
+const bcrypt = require('bcryptjs');
+const multer = require('multer');
+const { parse: csvParse } = require('csv-parse/sync');
+const iconv = require('iconv-lite');
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5*1024*1024 } });
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -84,9 +91,20 @@ function getAutoReply(key) {
   return r.content;
 }
 
-function saveMessage(lineUserId, direction, content, sentBy = 'bot') {
-  db.prepare('INSERT INTO messages (line_user_id, direction, content, sent_at, sent_by) VALUES (?,?,?,?,?)')
-    .run(lineUserId, direction, content, nowJST(), sentBy);
+function saveMessage(lineUserId, direction, content, sentBy = 'bot', opts = {}) {
+  db.prepare(`INSERT INTO messages
+    (line_user_id, direction, content, sent_at, sent_by, sender_type, message_type, template_id, template_name, title, body, raw_payload_json)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(
+      lineUserId, direction, content, nowJST(), sentBy,
+      opts.sender_type || (sentBy === 'bot' ? 'bot' : direction === 'in' ? 'candidate' : 'admin'),
+      opts.message_type || 'text',
+      opts.template_id || null,
+      opts.template_name || null,
+      opts.title || null,
+      opts.body || content,
+      opts.raw_payload_json || null
+    );
 }
 
 function upsertCandidate(lineUserId, updates) {
@@ -308,6 +326,8 @@ async function handlePostback(event) {
       ? 'ご回答ありがとうございます。\n入社希望として承りました。\n担当者より改めてご連絡いたします。'
       : 'ご回答ありがとうございます。\n辞退として承りました。この度はご検討いただきありがとうございました。');
 
+    saveMessage(userId, 'in', answerText, 'candidate', { message_type: 'postback', sender_type: 'candidate' });
+
     upsertCandidate(userId, {
       answer: answerText,
       answer_date: nowJST(),
@@ -368,9 +388,16 @@ app.post('/admin/login', (req, res) => {
   const found = db.prepare('SELECT * FROM admins WHERE admin_id=?').get(id);
   if (found) {
     if (found.password === password) {
+      // 2FA enabled → redirect to 2FA page
+      if (found.two_factor_enabled === 1) {
+        req.session.pendingAdminId = id;
+        return res.redirect('/admin/two-factor');
+      }
       req.session.adminLoggedIn = true;
       req.session.adminId = id;
+      req.session.adminRole = found.role || 'admin';
       req.session.isMaster = (id === masterId);
+      db.prepare('UPDATE admins SET last_login_at=? WHERE admin_id=?').run(nowJST(), id);
       return res.redirect('/admin');
     }
     return res.render('admin/login', { error: 'IDまたはパスワードが違います' });
@@ -379,6 +406,7 @@ app.post('/admin/login', (req, res) => {
   if (id === masterId && password === masterPass) {
     req.session.adminLoggedIn = true;
     req.session.adminId = id;
+    req.session.adminRole = 'master';
     req.session.isMaster = true;
     return res.redirect('/admin');
   }
@@ -434,6 +462,8 @@ app.get('/admin/candidates/:uid', requireAuth, (req, res) => {
       }
     }
 
+    const candidateNote = db.prepare('SELECT * FROM candidate_notes WHERE line_user_id=?').get(req.params.uid) || {};
+
     res.render('admin/detail', {
       c,
       messages,
@@ -444,6 +474,7 @@ app.get('/admin/candidates/:uid', requireAuth, (req, res) => {
       msg: req.query.msg || '',
       lineOfficialChatUrl,
       candidateDates,
+      candidateNote,
     });
   } catch (e) {
     console.error('[ERROR] 詳細取得失敗:', e.message);
@@ -488,7 +519,7 @@ app.post('/admin/candidates/:uid', requireAuth, (req, res) => {
       client.pushMessage(userId, buildInterviewMessages(name))
         .then(() => {
           const sentContent = `[面接後入社確認ボタン送信] ${name}様`;
-          saveMessage(userId, 'out', sentContent, req.session.adminId || 'bot');
+          saveMessage(userId, 'out', sentContent, req.session.adminId || 'bot', { message_type: 'button', title: '入社について', body: '入社を希望する / 辞退する' });
           upsertCandidate(userId, { last_sent: nowJST() });
           console.log(`[AUTO-SEND] 面接後ボタン送信: ${userId}`);
         })
@@ -514,9 +545,11 @@ app.post('/admin/candidates/:uid/send', requireAuth, async (req, res) => {
     let msgs;
     let logContent;
 
+    let sendOpts = {};
     if (messageType === 'interview_followup') {
       msgs = buildInterviewMessages(name);
       logContent = '[面接後入社確認]';
+      sendOpts = { message_type: 'button', title: '入社について', body: '入社を希望する / 辞退する' };
     } else if (messageType === 'visit_invite') {
       const content = getAutoReply('visit_invite') || '担当者より見学についてご案内します。\nご都合のよい日時をお知らせください。';
       msgs = [{ type: 'text', text: content }];
@@ -532,12 +565,14 @@ app.post('/admin/candidates/:uid/send', requireAuth, async (req, res) => {
       content = content.replace('{survey_url}', surveyUrl);
       msgs = [{ type: 'text', text: content }];
       logContent = content;
+      sendOpts = { message_type: 'form_url' };
       upsertCandidate(userId, { status: '見学後アンケート送信済み' });
     } else if (messageType === 'template' && template_id) {
       const tmpl = db.prepare('SELECT * FROM templates WHERE id=?').get(template_id);
       if (!tmpl) return res.status(400).send('テンプレートが見つかりません');
       msgs = [{ type: 'text', text: tmpl.content }];
       logContent = tmpl.content;
+      sendOpts = { message_type: 'template', template_id: tmpl.id, template_name: tmpl.name, body: tmpl.content };
     } else if (messageType === 'custom' && customText) {
       msgs = [{ type: 'text', text: customText }];
       logContent = customText;
@@ -546,7 +581,7 @@ app.post('/admin/candidates/:uid/send', requireAuth, async (req, res) => {
     }
 
     await client.pushMessage(userId, msgs);
-    saveMessage(userId, 'out', logContent, req.session.adminId || 'admin');
+    saveMessage(userId, 'out', logContent, req.session.adminId || 'admin', sendOpts);
     upsertCandidate(userId, { last_sent: nowJST() });
     if (c.needs_reply === '要返信') {
       upsertCandidate(userId, { needs_reply: '対応済み' });
@@ -567,6 +602,29 @@ app.post('/admin/candidates/:uid/mark-replied', requireAuth, (req, res) => {
     console.log(`[MARK-REPLIED] 要返信→対応済み: ${userId}`);
     res.redirect(`/admin/candidates/${userId}?msg=${encodeURIComponent('要返信を対応済みにしました')}`);
   } catch (e) {
+    res.status(500).send('エラー: ' + e.message);
+  }
+});
+
+// ===== 管理画面：候補ノート =====
+app.post('/admin/candidates/:uid/notes', requireAuth, (req, res) => {
+  const userId = req.params.uid;
+  const { personal_note, collected_info_note, interview_note, concern_note,
+    evaluation, recruitment_media, recruitment_cost, assigned_staff } = req.body;
+  const role = req.session.adminRole || 'admin';
+  if (role === 'viewer') return res.status(403).send('権限がありません');
+  try {
+    const existing = db.prepare('SELECT id FROM candidate_notes WHERE line_user_id=?').get(userId);
+    const cost = recruitment_cost ? parseInt(recruitment_cost) : null;
+    if (existing) {
+      db.prepare(`UPDATE candidate_notes SET personal_note=?,collected_info_note=?,interview_note=?,concern_note=?,evaluation=?,recruitment_media=?,recruitment_cost=?,assigned_staff=?,updated_by=?,updated_at=? WHERE line_user_id=?`)
+        .run(personal_note||'',collected_info_note||'',interview_note||'',concern_note||'',evaluation||'',recruitment_media||'',cost,assigned_staff||'',req.session.adminId||'',nowJST(),userId);
+    } else {
+      db.prepare(`INSERT INTO candidate_notes (line_user_id,personal_note,collected_info_note,interview_note,concern_note,evaluation,recruitment_media,recruitment_cost,assigned_staff,updated_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(userId,personal_note||'',collected_info_note||'',interview_note||'',concern_note||'',evaluation||'',recruitment_media||'',cost,assigned_staff||'',req.session.adminId||'',nowJST(),nowJST());
+    }
+    res.redirect(`/admin/candidates/${userId}?msg=${encodeURIComponent('メモを保存しました')}`);
+  } catch(e) {
     res.status(500).send('エラー: ' + e.message);
   }
 });
@@ -766,6 +824,218 @@ app.post('/admin/settings/delete/:adminId', requireAuth, (req, res) => {
     db.prepare('DELETE FROM admins WHERE admin_id=?').run(targetId);
     res.redirect('/admin/settings?msg=' + encodeURIComponent(`${targetId} を削除しました`));
   } catch (e) { res.status(500).send('エラー: ' + e.message); }
+});
+
+// ===== 二段階認証 =====
+app.get('/admin/two-factor', (req, res) => {
+  if (!req.session.pendingAdminId) return res.redirect('/admin/login');
+  res.render('admin/two-factor', { error: null });
+});
+
+app.post('/admin/two-factor', (req, res) => {
+  const adminId = req.session.pendingAdminId;
+  if (!adminId) return res.redirect('/admin/login');
+  const { token, backup_code } = req.body;
+  const admin = db.prepare('SELECT * FROM admins WHERE admin_id=?').get(adminId);
+  if (!admin) return res.redirect('/admin/login');
+
+  let verified = false;
+
+  // Try TOTP token
+  if (token && admin.two_factor_secret) {
+    verified = speakeasy.totp.verify({
+      secret: admin.two_factor_secret,
+      encoding: 'base32',
+      token: token.replace(/\s/g,''),
+      window: 2,
+    });
+  }
+
+  // Try backup code
+  if (!verified && backup_code && admin.backup_codes_json) {
+    const codes = JSON.parse(admin.backup_codes_json || '[]');
+    const idx = codes.indexOf(backup_code.trim().toUpperCase());
+    if (idx >= 0) {
+      verified = true;
+      codes.splice(idx, 1);
+      db.prepare('UPDATE admins SET backup_codes_json=? WHERE admin_id=?').run(JSON.stringify(codes), adminId);
+    }
+  }
+
+  if (!verified) {
+    return res.render('admin/two-factor', { error: '認証コードが正しくありません' });
+  }
+
+  const masterId = process.env.ADMIN_ID || 'admin';
+  req.session.pendingAdminId = null;
+  req.session.adminLoggedIn = true;
+  req.session.adminId = adminId;
+  req.session.adminRole = admin.role || 'admin';
+  req.session.isMaster = (adminId === masterId);
+  db.prepare('UPDATE admins SET last_login_at=? WHERE admin_id=?').run(nowJST(), adminId);
+  res.redirect('/admin');
+});
+
+// 2FA セキュリティ設定
+app.get('/admin/security/2fa', requireAuth, async (req, res) => {
+  const admin = db.prepare('SELECT * FROM admins WHERE admin_id=?').get(req.session.adminId);
+  res.render('admin/security-2fa', { admin: admin || {}, msg: req.query.msg || '', error: null, qrDataUrl: null, secret: null, backupCodes: null });
+});
+
+app.post('/admin/security/2fa/setup', requireAuth, async (req, res) => {
+  const adminId = req.session.adminId;
+  const secret = speakeasy.generateSecret({ name: `COLOR KITCHEN (${adminId})`, issuer: 'COLOR KITCHEN' });
+  db.prepare('UPDATE admins SET two_factor_secret=? WHERE admin_id=?').run(secret.base32, adminId);
+  const qrDataUrl = await QRCode.toDataURL(secret.otpauth_url);
+  const admin = db.prepare('SELECT * FROM admins WHERE admin_id=?').get(adminId);
+  res.render('admin/security-2fa', { admin: admin||{}, msg:'', error:null, qrDataUrl, secret: secret.base32, backupCodes: null });
+});
+
+app.post('/admin/security/2fa/verify', requireAuth, (req, res) => {
+  const adminId = req.session.adminId;
+  const { token } = req.body;
+  const admin = db.prepare('SELECT * FROM admins WHERE admin_id=?').get(adminId);
+  if (!admin?.two_factor_secret) return res.redirect('/admin/security/2fa?msg=' + encodeURIComponent('先にセットアップしてください'));
+
+  const verified = speakeasy.totp.verify({ secret: admin.two_factor_secret, encoding: 'base32', token: token?.replace(/\s/g,''), window: 2 });
+  if (!verified) {
+    return res.render('admin/security-2fa', { admin, msg:'', error:'コードが正しくありません。もう一度お試しください', qrDataUrl: null, secret: admin.two_factor_secret, backupCodes: null });
+  }
+
+  // Generate backup codes
+  const backupCodes = Array.from({length:8}, () => Math.random().toString(36).substr(2,4).toUpperCase() + '-' + Math.random().toString(36).substr(2,4).toUpperCase());
+  db.prepare('UPDATE admins SET two_factor_enabled=1, two_factor_confirmed_at=?, backup_codes_json=? WHERE admin_id=?')
+    .run(nowJST(), JSON.stringify(backupCodes), adminId);
+  res.render('admin/security-2fa', { admin: db.prepare('SELECT * FROM admins WHERE admin_id=?').get(adminId)||{}, msg:'二段階認証が有効になりました', error:null, qrDataUrl:null, secret:null, backupCodes });
+});
+
+app.post('/admin/security/2fa/disable', requireAuth, (req, res) => {
+  db.prepare('UPDATE admins SET two_factor_enabled=0, two_factor_secret=NULL, two_factor_confirmed_at=NULL, backup_codes_json=NULL WHERE admin_id=?').run(req.session.adminId);
+  res.redirect('/admin/security/2fa?msg=' + encodeURIComponent('二段階認証を無効にしました'));
+});
+
+// ===== 過去採用者管理 =====
+const LEGACY_RESULTS = ['採用','不採用','辞退','未定'];
+const LEGACY_EMPLOYMENT_STATUS = ['在籍中','退職済み','休職中','不明'];
+
+// CSV Export (must be before /:id routes)
+app.get('/admin/legacy-candidates/export', requireAuth, (req, res) => {
+  const records = db.prepare('SELECT * FROM legacy_candidates ORDER BY id').all();
+  const headers = ['id','name','kana','gender','age','phone','email','nearest_station','desired_store','employment_type','applied_date','visit_date','interview_date','hired_date','joined_date','result','recruitment_media','recruitment_cost','assigned_staff','old_memo','current_employment_status','resigned_date','note','created_at','updated_at'];
+  const csvLines = [headers.join(',')];
+  for (const r of records) {
+    csvLines.push(headers.map(h => `"${(r[h]??'').toString().replace(/"/g,'""')}"`).join(','));
+  }
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="legacy-candidates.csv"');
+  res.send('﻿' + csvLines.join('\n')); // UTF-8 BOM
+});
+
+// CSV Import page
+app.get('/admin/legacy-candidates/import', requireAuth, (req, res) => {
+  res.render('admin/legacy-import', { preview: null, columns: null, msg: req.query.msg || '', error:null, totalRows: 0 });
+});
+
+app.post('/admin/legacy-candidates/import/preview', requireAuth, upload.single('csvfile'), (req, res) => {
+  if (!req.file) return res.render('admin/legacy-import', { preview:null,columns:null,msg:'',error:'ファイルを選択してください', totalRows: 0 });
+  try {
+    let buffer = req.file.buffer;
+    let content;
+    if (buffer[0] === 0xEF && buffer[1] === 0xBB && buffer[2] === 0xBF) {
+      content = buffer.toString('utf8').slice(1);
+    } else {
+      content = iconv.decode(buffer, 'Shift_JIS');
+      if (!content) content = buffer.toString('utf8');
+    }
+    const records = csvParse(content, { columns: true, skip_empty_lines: true, trim: true });
+    req.session.csvPreview = records.slice(0, 200);
+    const columns = records.length > 0 ? Object.keys(records[0]) : [];
+    res.render('admin/legacy-import', { preview: records.slice(0,10), columns, msg:'', error:null, totalRows: records.length });
+  } catch(e) {
+    res.render('admin/legacy-import', { preview:null,columns:null,msg:'',error:'CSVの読み込みに失敗しました: '+e.message, totalRows: 0 });
+  }
+});
+
+app.post('/admin/legacy-candidates/import/execute', requireAuth, (req, res) => {
+  const records = req.session.csvPreview || [];
+  if (!records.length) return res.redirect('/admin/legacy-candidates/import?msg=' + encodeURIComponent('インポートするデータがありません'));
+  let imported = 0, errors = [];
+  const insert = db.prepare(`INSERT INTO legacy_candidates (name,kana,phone,email,nearest_station,desired_store,employment_type,applied_date,result,recruitment_media,recruitment_cost,assigned_staff,old_memo,current_employment_status,note,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+  const tx = db.transaction(() => {
+    for (let i=0;i<records.length;i++) {
+      const r = records[i];
+      try {
+        const cost = r['採用費']||r.recruitment_cost ? parseInt(r['採用費']||r.recruitment_cost||0)||null : null;
+        insert.run(r['氏名']||r.name||'',r['フリガナ']||r.kana||'',r['電話番号']||r.phone||'',r['メール']||r.email||'',r['最寄駅']||r.nearest_station||'',r['希望店舗']||r.desired_store||'',r['雇用形態']||r.employment_type||'',r['応募日']||r.applied_date||'',r['採用結果']||r.result||'',r['採用媒体']||r.recruitment_media||'',cost,r['担当者']||r.assigned_staff||'',r['メモ']||r.old_memo||'',r['在籍状況']||r.current_employment_status||'',r['備考']||r.note||'',nowJST(),nowJST());
+        imported++;
+      } catch(e2) { errors.push(`行${i+2}: ${e2.message}`); }
+    }
+  });
+  tx();
+  req.session.csvPreview = null;
+  const msg = `${imported}件インポートしました${errors.length?'（エラー'+errors.length+'件）':''}`;
+  res.redirect('/admin/legacy-candidates?msg=' + encodeURIComponent(msg));
+});
+
+// New form
+app.get('/admin/legacy-candidates/new', requireAuth, (req, res) => {
+  res.render('admin/legacy-candidate-form', { record: {}, stores: STORES, results: LEGACY_RESULTS, employmentStatuses: LEGACY_EMPLOYMENT_STATUS, msg:'', error:null, isNew:true });
+});
+
+// List
+app.get('/admin/legacy-candidates', requireAuth, (req, res) => {
+  try {
+    const { q, store, result, media, status: empStatus } = req.query;
+    let sql = 'SELECT * FROM legacy_candidates WHERE 1=1';
+    const params = [];
+    if (q) { sql += ' AND (name LIKE ? OR kana LIKE ? OR phone LIKE ?)'; params.push(`%${q}%`,`%${q}%`,`%${q}%`); }
+    if (store) { sql += ' AND desired_store=?'; params.push(store); }
+    if (result) { sql += ' AND result=?'; params.push(result); }
+    if (media) { sql += ' AND recruitment_media LIKE ?'; params.push(`%${media}%`); }
+    if (empStatus) { sql += ' AND current_employment_status=?'; params.push(empStatus); }
+    sql += ' ORDER BY id DESC';
+    const records = db.prepare(sql).all(...params);
+    res.render('admin/legacy-candidates', {
+      records, q:q||'', store:store||'', result:result||'', media:media||'', empStatus:empStatus||'',
+      stores: STORES, results: LEGACY_RESULTS, employmentStatuses: LEGACY_EMPLOYMENT_STATUS,
+      msg: req.query.msg || '',
+    });
+  } catch(e) { res.status(500).send('エラー: '+e.message); }
+});
+
+// Create
+app.post('/admin/legacy-candidates', requireAuth, (req, res) => {
+  const b = req.body;
+  try {
+    db.prepare(`INSERT INTO legacy_candidates (name,kana,gender,age,phone,email,nearest_station,desired_store,employment_type,applied_date,visit_date,interview_date,hired_date,joined_date,result,recruitment_media,recruitment_cost,assigned_staff,old_memo,current_employment_status,resigned_date,note,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(b.name||'',b.kana||'',b.gender||'',b.age||'',b.phone||'',b.email||'',b.nearest_station||'',b.desired_store||'',b.employment_type||'',b.applied_date||'',b.visit_date||'',b.interview_date||'',b.hired_date||'',b.joined_date||'',b.result||'',b.recruitment_media||'',b.recruitment_cost?parseInt(b.recruitment_cost):null,b.assigned_staff||'',b.old_memo||'',b.current_employment_status||'',b.resigned_date||'',b.note||'',nowJST(),nowJST());
+    res.redirect('/admin/legacy-candidates?msg=' + encodeURIComponent('登録しました'));
+  } catch(e) { res.status(500).send('エラー: '+e.message); }
+});
+
+// Edit form
+app.get('/admin/legacy-candidates/:id/edit', requireAuth, (req, res) => {
+  const record = db.prepare('SELECT * FROM legacy_candidates WHERE id=?').get(req.params.id);
+  if (!record) return res.redirect('/admin/legacy-candidates?msg=' + encodeURIComponent('見つかりません'));
+  res.render('admin/legacy-candidate-form', { record, stores: STORES, results: LEGACY_RESULTS, employmentStatuses: LEGACY_EMPLOYMENT_STATUS, msg:'', error:null, isNew:false });
+});
+
+// Update
+app.post('/admin/legacy-candidates/:id/edit', requireAuth, (req, res) => {
+  const b = req.body;
+  try {
+    db.prepare(`UPDATE legacy_candidates SET name=?,kana=?,gender=?,age=?,phone=?,email=?,nearest_station=?,desired_store=?,employment_type=?,applied_date=?,visit_date=?,interview_date=?,hired_date=?,joined_date=?,result=?,recruitment_media=?,recruitment_cost=?,assigned_staff=?,old_memo=?,current_employment_status=?,resigned_date=?,note=?,updated_at=? WHERE id=?`)
+      .run(b.name||'',b.kana||'',b.gender||'',b.age||'',b.phone||'',b.email||'',b.nearest_station||'',b.desired_store||'',b.employment_type||'',b.applied_date||'',b.visit_date||'',b.interview_date||'',b.hired_date||'',b.joined_date||'',b.result||'',b.recruitment_media||'',b.recruitment_cost?parseInt(b.recruitment_cost):null,b.assigned_staff||'',b.old_memo||'',b.current_employment_status||'',b.resigned_date||'',b.note||'',nowJST(),req.params.id);
+    res.redirect('/admin/legacy-candidates?msg=' + encodeURIComponent('更新しました'));
+  } catch(e) { res.status(500).send('エラー: '+e.message); }
+});
+
+// Delete
+app.post('/admin/legacy-candidates/:id/delete', requireAuth, (req, res) => {
+  try {
+    db.prepare('DELETE FROM legacy_candidates WHERE id=?').run(req.params.id);
+    res.redirect('/admin/legacy-candidates?msg=' + encodeURIComponent('削除しました'));
+  } catch(e) { res.status(500).send('エラー: '+e.message); }
 });
 
 // ===== LINE設定 =====

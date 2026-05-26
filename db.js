@@ -141,7 +141,74 @@ db.exec(`
     value TEXT,
     updated_at TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS candidate_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    line_user_id TEXT NOT NULL UNIQUE,
+    personal_note TEXT,
+    collected_info_note TEXT,
+    interview_note TEXT,
+    concern_note TEXT,
+    evaluation TEXT,
+    recruitment_media TEXT,
+    recruitment_cost INTEGER,
+    assigned_staff TEXT,
+    updated_by TEXT,
+    created_at TEXT,
+    updated_at TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS legacy_candidates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    kana TEXT,
+    gender TEXT,
+    age TEXT,
+    phone TEXT,
+    email TEXT,
+    nearest_station TEXT,
+    desired_store TEXT,
+    employment_type TEXT,
+    applied_date TEXT,
+    visit_date TEXT,
+    interview_date TEXT,
+    hired_date TEXT,
+    joined_date TEXT,
+    result TEXT,
+    recruitment_media TEXT,
+    recruitment_cost INTEGER,
+    assigned_staff TEXT,
+    old_memo TEXT,
+    current_employment_status TEXT,
+    resigned_date TEXT,
+    note TEXT,
+    created_at TEXT,
+    updated_at TEXT
+  );
 `);
+
+// ===== マイグレーション =====
+const migrations = [
+  // messages table extensions
+  `ALTER TABLE messages ADD COLUMN sender_type TEXT DEFAULT 'bot'`,
+  `ALTER TABLE messages ADD COLUMN message_type TEXT DEFAULT 'text'`,
+  `ALTER TABLE messages ADD COLUMN template_id INTEGER`,
+  `ALTER TABLE messages ADD COLUMN template_name TEXT`,
+  `ALTER TABLE messages ADD COLUMN title TEXT`,
+  `ALTER TABLE messages ADD COLUMN body TEXT`,
+  `ALTER TABLE messages ADD COLUMN raw_payload_json TEXT`,
+  // admins table extensions
+  `ALTER TABLE admins ADD COLUMN two_factor_enabled INTEGER DEFAULT 0`,
+  `ALTER TABLE admins ADD COLUMN two_factor_secret TEXT`,
+  `ALTER TABLE admins ADD COLUMN two_factor_confirmed_at TEXT`,
+  `ALTER TABLE admins ADD COLUMN backup_codes_json TEXT`,
+  `ALTER TABLE admins ADD COLUMN last_login_at TEXT`,
+  `ALTER TABLE admins ADD COLUMN failed_login_count INTEGER DEFAULT 0`,
+  `ALTER TABLE admins ADD COLUMN locked_until TEXT`,
+];
+for (const sql of migrations) {
+  try { db.exec(sql); } catch(e) { /* column already exists */ }
+}
 
 // ===== auto_repliesのデフォルト値 =====
 const nowJST = () => new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });

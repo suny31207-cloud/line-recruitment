@@ -9,11 +9,18 @@
 <body>
 <header>
   <div class="header-inner">
-    <h1>COLOR KITCHEN 採用管理</h1>
-    <nav class="header-nav">
+    <h1><a href="/admin" style="color:white;text-decoration:none">COLOR KITCHEN 採用管理</a></h1>
+    <button class="hamburger" id="hamburger" aria-label="メニュー" onclick="toggleMenu()">
+      <span></span><span></span><span></span>
+    </button>
+    <nav class="header-nav" id="headerNav">
+      <a href="/admin" class="nav-link">応募者管理</a>
       <a href="/admin/templates" class="nav-link">テンプレート</a>
       <a href="/admin/auto-replies" class="nav-link">自動返信</a>
-      <a href="/admin/settings" class="nav-link">設定</a>
+      <a href="/admin/legacy-candidates" class="nav-link">過去採用者</a>
+      <a href="/admin/settings" class="nav-link">管理者設定</a>
+      <a href="/admin/security/2fa" class="nav-link">セキュリティ</a>
+      <a href="/admin/settings/line" class="nav-link">LINE設定</a>
       <a href="/admin/logout" class="logout-link">ログアウト</a>
     </nav>
   </div>
@@ -259,6 +266,57 @@
 
         <button type="submit" class="btn-primary btn-block">保存する</button>
       </form>
+
+      <!-- 個人メモ・採用費 -->
+      <div class="card">
+        <h3>個人メモ・採用費</h3>
+        <form action="/admin/candidates/<%= c.line_user_id %>/notes" method="POST">
+          <div class="form-group">
+            <label>個人メモ</label>
+            <textarea name="personal_note" rows="3"><%= candidateNote.personal_note || '' %></textarea>
+          </div>
+          <div class="form-group">
+            <label>回収済み情報メモ</label>
+            <textarea name="collected_info_note" rows="2"><%= candidateNote.collected_info_note || '' %></textarea>
+          </div>
+          <div class="form-group">
+            <label>面談メモ</label>
+            <textarea name="interview_note" rows="2"><%= candidateNote.interview_note || '' %></textarea>
+          </div>
+          <div class="form-group">
+            <label>懸念点</label>
+            <textarea name="concern_note" rows="2"><%= candidateNote.concern_note || '' %></textarea>
+          </div>
+          <div class="grid-2">
+            <div class="form-group">
+              <label>採用評価</label>
+              <select name="evaluation">
+                <option value="">-</option>
+                <% ['S','A','B','C','D'].forEach(v=>{ %><option value="<%= v %>" <%= candidateNote.evaluation===v?'selected':'' %>><%= v %></option><% }) %>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>採用媒体</label>
+              <input type="text" name="recruitment_media" value="<%= candidateNote.recruitment_media || '' %>" placeholder="Indeed、タウンワーク等">
+            </div>
+            <div class="form-group">
+              <label>採用費（円）</label>
+              <input type="number" name="recruitment_cost" value="<%= candidateNote.recruitment_cost ?? '' %>" placeholder="30000" min="0">
+              <% if (candidateNote.recruitment_cost != null && candidateNote.recruitment_cost !== '') { %>
+              <small><%= Number(candidateNote.recruitment_cost).toLocaleString('ja-JP') %>円</small>
+              <% } %>
+            </div>
+            <div class="form-group">
+              <label>担当者名</label>
+              <input type="text" name="assigned_staff" value="<%= candidateNote.assigned_staff || '' %>">
+            </div>
+          </div>
+          <% if (candidateNote.updated_by) { %>
+          <div class="sub-text" style="margin-bottom:0.75rem">最終更新：<%= candidateNote.updated_by %> (<%= candidateNote.updated_at || '' %>)</div>
+          <% } %>
+          <button type="submit" class="btn-primary btn-block">メモを保存する</button>
+        </form>
+      </div>
     </div>
 
     <!-- 右カラム：トーク履歴 + LINE送信 -->
@@ -296,7 +354,20 @@
           <% } %>
           <% messages.forEach(m => { %>
           <div class="chat-message chat-<%= m.direction %>">
-            <div class="chat-bubble"><%= m.content %></div>
+            <div class="chat-bubble">
+              <% if (m.message_type === 'button') { %>
+                <% if (m.title) { %><div class="msg-title"><%= m.title %></div><% } %>
+                <%= m.body || m.content %>
+              <% } else if (m.message_type === 'template' && m.template_name) { %>
+                <div class="msg-badge">テンプレ: <%= m.template_name %></div>
+                <%= m.body || m.content %>
+              <% } else { %>
+                <%= m.body || m.content %>
+              <% } %>
+              <% if (m.raw_payload_json) { %>
+              <details class="msg-raw"><summary>詳細</summary><pre><%= m.raw_payload_json %></pre></details>
+              <% } %>
+            </div>
             <div class="chat-meta">
               <span class="chat-time"><%= m.sent_at || '' %></span>
               <% if (m.direction !== 'in') { %>
@@ -365,6 +436,10 @@
 </main>
 
 <script>
+function toggleMenu() {
+  document.getElementById('headerNav').classList.toggle('open');
+}
+
 function toggleSendType() {
   const type = document.getElementById('msgType').value;
   const templateGroup = document.getElementById('templateSelectGroup');

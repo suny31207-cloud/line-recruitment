@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>過去採用者管理 - COLOR KITCHEN 採用管理</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<header>
+  <div class="header-inner">
+    <h1><a href="/admin" style="color:white;text-decoration:none">COLOR KITCHEN 採用管理</a></h1>
+    <button class="hamburger" id="hamburger" aria-label="メニュー" onclick="toggleMenu()">
+      <span></span><span></span><span></span>
+    </button>
+    <nav class="header-nav" id="headerNav">
+      <a href="/admin" class="nav-link">応募者管理</a>
+      <a href="/admin/templates" class="nav-link">テンプレート</a>
+      <a href="/admin/auto-replies" class="nav-link">自動返信</a>
+      <a href="/admin/legacy-candidates" class="nav-link">過去採用者</a>
+      <a href="/admin/settings" class="nav-link">管理者設定</a>
+      <a href="/admin/security/2fa" class="nav-link">セキュリティ</a>
+      <a href="/admin/settings/line" class="nav-link">LINE設定</a>
+      <a href="/admin/logout" class="logout-link">ログアウト</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <div class="page-header">
+    <h2>過去採用者管理 <span class="count-badge"><%= records.length %>名</span></h2>
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-left:auto">
+      <a href="/admin/legacy-candidates/new" class="btn">+ 新規登録</a>
+      <a href="/admin/legacy-candidates/export" class="btn-secondary" style="padding:0.35rem 0.9rem;font-size:0.8rem;text-decoration:none;border-radius:5px;display:inline-flex;align-items:center">CSVエクスポート</a>
+      <a href="/admin/legacy-candidates/import" class="btn-secondary" style="padding:0.35rem 0.9rem;font-size:0.8rem;text-decoration:none;border-radius:5px;display:inline-flex;align-items:center">CSVインポート</a>
+    </div>
+  </div>
+
+  <% if (msg) { %>
+  <div class="alert alert-success"><%= msg %></div>
+  <% } %>
+
+  <!-- 検索フォーム -->
+  <div class="card" style="margin-bottom:1rem">
+    <form action="/admin/legacy-candidates" method="GET" style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:flex-end">
+      <div class="form-group" style="margin-bottom:0;flex:1;min-width:180px">
+        <label>検索</label>
+        <input type="text" name="q" value="<%= q %>" placeholder="氏名・フリガナ・電話番号">
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label>希望店舗</label>
+        <select name="store">
+          <option value="">全店舗</option>
+          <% stores.forEach(s => { %>
+          <option value="<%= s %>" <%= store===s?'selected':'' %>><%= s %></option>
+          <% }) %>
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label>採用結果</label>
+        <select name="result">
+          <option value="">全結果</option>
+          <% results.forEach(r => { %>
+          <option value="<%= r %>" <%= result===r?'selected':'' %>><%= r %></option>
+          <% }) %>
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label>在籍状況</label>
+        <select name="status">
+          <option value="">全状況</option>
+          <% employmentStatuses.forEach(s => { %>
+          <option value="<%= s %>" <%= empStatus===s?'selected':'' %>><%= s %></option>
+          <% }) %>
+        </select>
+      </div>
+      <div style="display:flex;gap:0.5rem">
+        <button type="submit" class="btn-primary" style="padding:0.48rem 1rem">検索</button>
+        <a href="/admin/legacy-candidates" class="btn-secondary" style="padding:0.48rem 0.75rem;text-decoration:none;font-size:0.88rem;border-radius:5px;display:inline-flex;align-items:center">リセット</a>
+      </div>
+    </form>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>氏名</th>
+          <th class="col-sp-hide">希望店舗</th>
+          <th class="col-sp-hide">採用結果</th>
+          <th class="col-sp-hide">採用媒体</th>
+          <th class="col-sp-hide">採用費</th>
+          <th class="col-sp-hide">在籍状況</th>
+          <th class="col-sp-hide">応募日</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% if (records.length === 0) { %>
+        <tr>
+          <td colspan="8" class="empty-row">データがありません</td>
+        </tr>
+        <% } %>
+        <% records.forEach(r => { %>
+        <tr>
+          <td>
+            <strong><%= r.name || '(名前なし)' %></strong>
+            <% if (r.kana) { %><div class="sub-text"><%= r.kana %></div><% } %>
+            <% if (r.phone) { %><div class="sub-text"><%= r.phone %></div><% } %>
+          </td>
+          <td class="small-text col-sp-hide"><%= r.desired_store || '-' %></td>
+          <td class="col-sp-hide">
+            <% if (r.result === '採用') { %>
+              <span class="status-badge status-入社承諾"><%= r.result %></span>
+            <% } else if (r.result === '不採用' || r.result === '辞退') { %>
+              <span class="status-badge status-不採用"><%= r.result %></span>
+            <% } else { %>
+              <span class="text-muted"><%= r.result || '-' %></span>
+            <% } %>
+          </td>
+          <td class="small-text col-sp-hide"><%= r.recruitment_media || '-' %></td>
+          <td class="small-text col-sp-hide">
+            <% if (r.recruitment_cost != null && r.recruitment_cost !== '') { %>
+              <%= Number(r.recruitment_cost).toLocaleString('ja-JP') %>円
+            <% } else { %>-<% } %>
+          </td>
+          <td class="small-text col-sp-hide"><%= r.current_employment_status || '-' %></td>
+          <td class="small-text col-sp-hide"><%= r.applied_date || '-' %></td>
+          <td>
+            <div style="display:flex;gap:0.4rem;flex-wrap:wrap">
+              <a href="/admin/legacy-candidates/<%= r.id %>/edit" class="btn btn-sm">編集</a>
+              <form action="/admin/legacy-candidates/<%= r.id %>/delete" method="POST" style="display:inline" onsubmit="return confirm('<%= r.name || r.id %>を削除しますか？')">
+                <button type="submit" class="btn-delete">削除</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+</main>
+<script>
+function toggleMenu() {
+  document.getElementById('headerNav').classList.toggle('open');
+}
+</script>
+</body>
+</html>

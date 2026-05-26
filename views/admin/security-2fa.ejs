@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>セキュリティ設定 - COLOR KITCHEN 採用管理</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<header>
+  <div class="header-inner">
+    <h1><a href="/admin" style="color:white;text-decoration:none">COLOR KITCHEN 採用管理</a></h1>
+    <button class="hamburger" id="hamburger" aria-label="メニュー" onclick="toggleMenu()">
+      <span></span><span></span><span></span>
+    </button>
+    <nav class="header-nav" id="headerNav">
+      <a href="/admin" class="nav-link">応募者管理</a>
+      <a href="/admin/templates" class="nav-link">テンプレート</a>
+      <a href="/admin/auto-replies" class="nav-link">自動返信</a>
+      <a href="/admin/legacy-candidates" class="nav-link">過去採用者</a>
+      <a href="/admin/settings" class="nav-link">管理者設定</a>
+      <a href="/admin/security/2fa" class="nav-link">セキュリティ</a>
+      <a href="/admin/settings/line" class="nav-link">LINE設定</a>
+      <a href="/admin/logout" class="logout-link">ログアウト</a>
+    </nav>
+  </div>
+</header>
+<main>
+  <div class="page-header">
+    <h2>セキュリティ設定</h2>
+  </div>
+
+  <% if (msg) { %>
+  <div class="alert alert-success"><%= msg %></div>
+  <% } %>
+  <% if (error) { %>
+  <div class="alert alert-error"><%= error %></div>
+  <% } %>
+
+  <!-- 二段階認証ステータス -->
+  <div class="card">
+    <h3>二段階認証（TOTP）</h3>
+    <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.25rem;flex-wrap:wrap">
+      <span>現在のステータス：</span>
+      <% if (admin.two_factor_enabled) { %>
+        <span class="status-badge status-入社承諾">有効</span>
+        <% if (admin.two_factor_confirmed_at) { %>
+        <span style="font-size:0.78rem;color:#888">設定日：<%= admin.two_factor_confirmed_at %></span>
+        <% } %>
+      <% } else { %>
+        <span class="status-badge status-ブロック済み">無効</span>
+      <% } %>
+    </div>
+
+    <% if (!admin.two_factor_enabled && !qrDataUrl) { %>
+    <!-- Setup button -->
+    <form action="/admin/security/2fa/setup" method="POST">
+      <button type="submit" class="btn-primary">二段階認証をセットアップする</button>
+    </form>
+    <p style="font-size:0.82rem;color:#888;margin-top:0.75rem">
+      Google Authenticator などの認証アプリが必要です。
+    </p>
+    <% } %>
+
+    <% if (qrDataUrl) { %>
+    <!-- QR Code display and verification -->
+    <div style="margin-bottom:1.5rem">
+      <p style="font-size:0.88rem;margin-bottom:1rem">
+        1. Google Authenticator（またはAuthy）をスマートフォンにインストールしてください。<br>
+        2. アプリでQRコードをスキャンしてください。<br>
+        3. 表示された6桁のコードを入力して確認してください。
+      </p>
+      <div style="text-align:center;margin:1.5rem 0">
+        <img src="<%= qrDataUrl %>" alt="QRコード" style="max-width:200px;border:1px solid #eee;border-radius:8px;padding:8px">
+      </div>
+      <details style="margin-bottom:1rem">
+        <summary style="font-size:0.82rem;color:#888;cursor:pointer">シークレットキーを表示（手動入力の場合）</summary>
+        <code style="display:block;background:#f8f9fa;padding:0.75rem;border-radius:6px;margin-top:0.5rem;font-size:0.88rem;word-break:break-all"><%= secret %></code>
+      </details>
+      <form action="/admin/security/2fa/verify" method="POST">
+        <div class="form-group">
+          <label>認証コード（6桁）</label>
+          <input
+            type="text"
+            name="token"
+            maxlength="6"
+            inputmode="numeric"
+            placeholder="000000"
+            style="font-size:1.25rem;text-align:center;letter-spacing:0.2em;max-width:200px"
+            required
+          >
+        </div>
+        <button type="submit" class="btn-primary">確認して有効にする</button>
+      </form>
+    </div>
+    <% } %>
+
+    <% if (backupCodes && backupCodes.length > 0) { %>
+    <!-- Backup codes display -->
+    <div class="alert alert-success" style="margin-bottom:1.25rem">
+      二段階認証が有効になりました。以下のバックアップコードを安全な場所に保存してください。
+    </div>
+    <div class="card" style="background:#fff9e6;border:1px solid #ffc107">
+      <h3 style="color:#856404;border-left-color:#ffc107">バックアップコード（各1回使用可能）</h3>
+      <p style="font-size:0.82rem;color:#856404;margin-bottom:1rem">認証アプリが使えない場合に使用できます。各コードは1回のみ有効です。</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:1rem">
+        <% backupCodes.forEach(code => { %>
+        <code style="background:white;padding:0.4rem 0.75rem;border-radius:4px;font-size:0.88rem;border:1px solid #ffc107"><%= code %></code>
+        <% }) %>
+      </div>
+      <button type="button" class="btn-secondary" onclick="printBackupCodes()">印刷する</button>
+    </div>
+    <% } %>
+
+    <% if (admin.two_factor_enabled && !qrDataUrl && !backupCodes) { %>
+    <!-- Disable button -->
+    <form action="/admin/security/2fa/disable" method="POST" onsubmit="return confirm('二段階認証を無効にしますか？セキュリティが低下します。')">
+      <button type="submit" class="btn-delete" style="padding:0.5rem 1.25rem;font-size:0.85rem">二段階認証を無効にする</button>
+    </form>
+    <% } %>
+  </div>
+
+  <!-- 最終ログイン情報 -->
+  <% if (admin.last_login_at) { %>
+  <div class="card">
+    <h3>ログイン履歴</h3>
+    <div class="form-group">
+      <label>最終ログイン日時</label>
+      <input type="text" value="<%= admin.last_login_at %>" readonly class="readonly-field">
+    </div>
+  </div>
+  <% } %>
+
+</main>
+<script>
+function toggleMenu() {
+  document.getElementById('headerNav').classList.toggle('open');
+}
+function printBackupCodes() {
+  window.print();
+}
+</script>
+</body>
+</html>
